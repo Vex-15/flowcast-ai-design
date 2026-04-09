@@ -53,6 +53,7 @@ const Dashboard = () => {
           <ReturnsView
             data={brain.returnAnalysis}
             skuName={brain.currentSKU.name}
+            returnExplanation={brain.returnExplanation}
           />
         );
 

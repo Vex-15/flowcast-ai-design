@@ -1,11 +1,12 @@
 import type {
   ForecastPoint, DemandDecomposition, AnomalyEvent,
   SignalFusionResult, SignalSource, IntentAccelerationResult, IntentSignal,
-  ReturnAnalysis, ReturnReason,
+  ReturnAnalysis, ReturnReason, ReturnRiskFactor, ReturnTrendPoint,
   InventoryDecision, StoreInventory,
-  SimulationParams, SimulationResult,
-  Explanation, FeatureImportance,
+  SimulationParams, SimulationResult, ProfitLossResult, ReturnImpactResult, ForecastComparisonPoint,
+  Explanation, FeatureImportance, ConfidenceBreakdown, ConfidenceSegment,
   OrchestrationAlert, SKUPriority, KPI,
+  DynamicNotification, NotificationSummary,
 } from "./types";
 import { getSKU, getStore, skuCatalog, stores } from "./brands";
 
@@ -24,6 +25,26 @@ function hashStr(str: string): number {
     h = ((h << 5) - h + str.charCodeAt(i)) | 0;
   }
   return Math.abs(h);
+}
+
+// ─── Probabilistic helpers (Box-Muller for normal distribution) ──
+function normalRandom(rng: () => number, mean: number, stddev: number): number {
+  const u1 = rng();
+  const u2 = rng();
+  const z = Math.sqrt(-2 * Math.log(Math.max(0.0001, u1))) * Math.cos(2 * Math.PI * u2);
+  return mean + stddev * z;
+}
+
+function binomialRandom(rng: () => number, n: number, p: number): number {
+  let count = 0;
+  for (let i = 0; i < Math.min(n, 100); i++) {
+    if (rng() < p) count++;
+  }
+  return n > 100 ? Math.round(count * (n / 100)) : count;
+}
+
+function clamp(val: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, val));
 }
 
 // ─── Demand Forecast ──────────────────────────────────────
@@ -223,7 +244,7 @@ export function generateIntentAcceleration(skuId: string): IntentAccelerationRes
   };
 }
 
-// ─── Return Intelligence ──────────────────────────────────
+// ─── Return Intelligence (ENHANCED) ──────────────────────
 const returnReasonPool = [
   "Color mismatch with listing",
   "Size/dimension confusion",
@@ -237,11 +258,42 @@ const returnReasonPool = [
   "Found better price elsewhere",
 ];
 
+const categoryReturnRates: Record<string, number> = {
+  "Appliances": 0.06,
+  "Cookware": 0.04,
+  "Cutlery": 0.03,
+  "Living Room": 0.14,
+  "Bedding": 0.12,
+  "Decor": 0.05,
+  "Bedroom": 0.09,
+  "Outdoor": 0.07,
+  "Beds": 0.10,
+  "Seating": 0.08,
+  "Lighting": 0.05,
+  "Hardware": 0.02,
+  "Travel": 0.06,
+  "Accessories": 0.04,
+  "Dining": 0.08,
+};
+
 export function generateReturnAnalysis(skuId: string): ReturnAnalysis {
   const rng = seeded(hashStr(skuId + "return"));
   const sku = getSKU(skuId);
-  const returnRate = parseFloat((sku.returnRiskBase + rng() * 0.08).toFixed(3));
-  const riskScore = Math.min(100, Math.round(returnRate * 500 + rng() * 15));
+  
+  // Use normal distribution for realistic return rate
+  const baseReturnRate = sku.returnRiskBase;
+  const returnRate = parseFloat(clamp(
+    normalRandom(rng, baseReturnRate, baseReturnRate * 0.2),
+    0.01, 0.35
+  ).toFixed(3));
+  
+  // Risk score: composite of multiple factors
+  const categoryAvg = categoryReturnRates[sku.category] || 0.08;
+  const priceRiskFactor = sku.price > 1000 ? 15 : sku.price > 500 ? 10 : sku.price > 200 ? 5 : 0;
+  const categoryRiskFactor = returnRate > categoryAvg ? 20 : 0;
+  const baseRiskScore = returnRate * 400 + priceRiskFactor + categoryRiskFactor + rng() * 10;
+  const riskScore = Math.min(100, Math.round(baseRiskScore));
+  const riskLabel = riskScore > 60 ? "High" : riskScore > 35 ? "Medium" : "Low";
 
   const numReasons = 3 + Math.floor(rng() * 3);
   const shuffled = [...returnReasonPool].sort(() => rng() - 0.5);
@@ -273,15 +325,88 @@ export function generateReturnAnalysis(skuId: string): ReturnAnalysis {
   if (reasons.some((r) => r.reason.includes("Fabric"))) fixes.push("Add fabric swatch samples or AR texture preview");
   if (fixes.length === 0) fixes.push("Continue monitoring — return rate within acceptable range");
 
+  // ─── NEW: Return Risk Factors (feature importance for return prediction)
+  const riskFactors: ReturnRiskFactor[] = [
+    {
+      name: "Category Return Rate",
+      weight: parseFloat((0.25 + rng() * 0.1).toFixed(2)),
+      value: `${(categoryAvg * 100).toFixed(1)}% avg in ${sku.category}`,
+      impact: categoryAvg > 0.1 ? "high" : categoryAvg > 0.06 ? "medium" : "low",
+      direction: categoryAvg > 0.08 ? "increases_risk" : "decreases_risk",
+    },
+    {
+      name: "Historical Return Rate",
+      weight: parseFloat((0.30 + rng() * 0.1).toFixed(2)),
+      value: `${(returnRate * 100).toFixed(1)}% past 90 days`,
+      impact: returnRate > 0.15 ? "high" : returnRate > 0.08 ? "medium" : "low",
+      direction: returnRate > categoryAvg ? "increases_risk" : "decreases_risk",
+    },
+    {
+      name: "Price Point",
+      weight: parseFloat((0.15 + rng() * 0.05).toFixed(2)),
+      value: `$${sku.price.toFixed(0)} (${sku.price > 1000 ? "premium" : sku.price > 500 ? "mid-high" : "standard"})`,
+      impact: sku.price > 1000 ? "high" : sku.price > 500 ? "medium" : "low",
+      direction: sku.price > 500 ? "increases_risk" : "decreases_risk",
+    },
+    {
+      name: "Customer Satisfaction Signal",
+      weight: parseFloat((0.12 + rng() * 0.08).toFixed(2)),
+      value: `${Math.round(60 + rng() * 35)}% positive reviews`,
+      impact: rng() > 0.5 ? "medium" : "low",
+      direction: rng() > 0.4 ? "decreases_risk" : "increases_risk",
+    },
+    {
+      name: "Listing Quality Score",
+      weight: parseFloat((0.10 + rng() * 0.05).toFixed(2)),
+      value: `${Math.round(65 + rng() * 30)}/100`,
+      impact: rng() > 0.6 ? "low" : "medium",
+      direction: rng() > 0.5 ? "decreases_risk" : "increases_risk",
+    },
+    {
+      name: "Seasonal Volatility",
+      weight: parseFloat((0.08 + rng() * 0.04).toFixed(2)),
+      value: sku.seasonalPeak.length > 0 ? `Peak: ${sku.seasonalPeak.join(", ")}` : "No seasonal pattern",
+      impact: sku.seasonalPeak.length > 1 ? "medium" : "low",
+      direction: sku.seasonalPeak.length > 0 ? "increases_risk" : "decreases_risk",
+    },
+  ];
+  riskFactors.sort((a, b) => b.weight - a.weight);
+
+  // Natural language explanation
+  const topFactors = riskFactors.filter(f => f.direction === "increases_risk").slice(0, 2);
+  const returnExplanation = riskLabel === "High"
+    ? `High return risk (${riskScore}/100) driven by ${topFactors.map(f => f.name.toLowerCase()).join(" and ")}. Past ${(returnRate * 100).toFixed(1)}% return rate in ${sku.category} significantly exceeds category average of ${(categoryAvg * 100).toFixed(1)}%.`
+    : riskLabel === "Medium"
+    ? `Moderate return risk (${riskScore}/100). ${topFactors.length > 0 ? `${topFactors[0].name} is the primary concern.` : ""} Return rate of ${(returnRate * 100).toFixed(1)}% is ${returnRate > categoryAvg ? "above" : "near"} category average.`
+    : `Low return risk (${riskScore}/100). Product performs well with ${(returnRate * 100).toFixed(1)}% return rate, below category average of ${(categoryAvg * 100).toFixed(1)}%.`;
+
+  // Historical trend (6 months)
+  const trendRng = seeded(hashStr(skuId + "returntrend"));
+  const months = ["Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
+  const historicalTrend: ReturnTrendPoint[] = months.map((month, i) => {
+    const seasonalMod = (month === "Dec" || month === "Nov") ? 1.2 : (month === "Jan") ? 1.15 : 1.0;
+    const rate = parseFloat(clamp(
+      normalRandom(trendRng, returnRate * seasonalMod, returnRate * 0.15),
+      0.01, 0.40
+    ).toFixed(3));
+    const volume = Math.round(normalRandom(trendRng, reportedDemand * 0.8, 20));
+    return { month, rate, volume: Math.max(10, volume) };
+  });
+
   return {
     skuId,
     returnRate,
     riskScore,
+    riskLabel,
     reasons,
     suggestedFixes: fixes,
     phantomDemandGap,
     trueDemand,
     reportedDemand,
+    riskFactors,
+    returnExplanation,
+    categoryAvgReturn: categoryAvg,
+    historicalTrend,
   };
 }
 
@@ -331,38 +456,123 @@ export function generateInventoryDecision(skuId: string): InventoryDecision {
   };
 }
 
-// ─── What-If Simulation ───────────────────────────────────
+// ─── What-If Simulation (ENHANCED with probabilistic modeling) ───
 export function simulateWhatIf(skuId: string, params: SimulationParams): SimulationResult {
   const rng = seeded(hashStr(skuId + "sim" + JSON.stringify(params)));
   const sku = getSKU(skuId);
   const baseDailyDemand = Math.max(5, Math.round(60 - sku.price * 0.02 + rng() * 15));
   const baseStock = Math.round(baseDailyDemand * 14);
 
+  // Seasonality modifier
+  const seasonalMods: Record<string, number> = {
+    "none": 1.0, "spring": 1.15, "summer": 1.1, "holiday": 1.4, "back-to-school": 1.25
+  };
+  const seasonMod = seasonalMods[params.seasonalityMode || "none"] || 1.0;
+
   const effectiveDemand = baseDailyDemand
     * params.demandMultiplier
     * (params.festivalActive ? 1.3 : 1.0)
-    * (1 + params.promotionIntensity / 200);
+    * (1 + params.promotionIntensity / 200)
+    * seasonMod
+    * (1 + (params.externalTrendFactor || 0) / 200);
 
-  const returnAdj = 1 - (params.returnRateAdj / 100 * sku.returnRiskBase);
-  const adjDemand = effectiveDemand * returnAdj;
+  // Probabilistic return rate using binomial model
+  const baseReturnRate = sku.returnRiskBase;
+  const adjReturnRate = clamp(baseReturnRate * (1 + params.returnRateAdj / 100), 0, 0.5);
+  
+  const demandFluctuation = (params.demandFluctuation || 15) / 100; // convert % to fraction
 
   let runningStock = baseStock;
   const timeline: { day: string; stock: number; demand: number }[] = [];
+  const forecastComparison: ForecastComparisonPoint[] = [];
+  const confidenceInterval: { day: string; lower: number; upper: number; mean: number }[] = [];
   let stockoutDay: number | null = null;
+  let totalDemand = 0;
+  let totalReturns = 0;
+  let totalStockoutLoss = 0;
 
   for (let i = 0; i < 21; i++) {
-    const dailyDemand = Math.round(adjDemand * (0.85 + rng() * 0.3));
-    runningStock = Math.max(0, runningStock - dailyDemand);
+    // Use normal distribution for demand with variance control
+    const dailyDemand = Math.max(0, Math.round(
+      normalRandom(rng, effectiveDemand, effectiveDemand * demandFluctuation)
+    ));
+    
+    // Binomial distribution for returns (each sale has p chance of return)
+    const dailyReturns = binomialRandom(rng, dailyDemand, adjReturnRate);
+    const netDemand = dailyDemand - dailyReturns;
+    
+    const previousStock = runningStock;
+    runningStock = Math.max(0, runningStock - netDemand);
+    
+    // Track stockout loss
+    if (runningStock === 0 && previousStock > 0) {
+      totalStockoutLoss += (netDemand - previousStock) * sku.price;
+    } else if (runningStock === 0) {
+      totalStockoutLoss += netDemand * sku.price;
+    }
+    
+    totalDemand += dailyDemand;
+    totalReturns += dailyReturns;
+    
     timeline.push({
       day: `Day ${i + 1}`,
       stock: runningStock,
       demand: dailyDemand,
     });
+    
+    // Forecast comparison (baseline vs simulated vs return-adjusted)
+    const baselineDemand = Math.round(baseDailyDemand * (0.85 + rng() * 0.3));
+    forecastComparison.push({
+      day: `Day ${i + 1}`,
+      baseline: baselineDemand,
+      simulated: dailyDemand,
+      returnAdjusted: dailyDemand - dailyReturns,
+    });
+    
+    // Confidence interval
+    const ciWidth = effectiveDemand * demandFluctuation * 1.96; // 95% CI
+    confidenceInterval.push({
+      day: `Day ${i + 1}`,
+      mean: Math.round(effectiveDemand),
+      lower: Math.round(Math.max(0, effectiveDemand - ciWidth)),
+      upper: Math.round(effectiveDemand + ciWidth),
+    });
+    
     if (runningStock === 0 && stockoutDay === null) stockoutDay = i + 1;
   }
 
   const baseRevenue = baseDailyDemand * sku.price * 21;
-  const simRevenue = Math.round(adjDemand * sku.price * 21);
+  const grossRevenue = Math.round(totalDemand * sku.price);
+  const returnCost = Math.round(totalReturns * sku.price * 0.85); // 85% cost of returns (refund + processing)
+  const holdingCost = Math.round(baseStock * sku.price * 0.002 * 21); // 0.2% daily holding
+  const netProfit = grossRevenue - returnCost - holdingCost - totalStockoutLoss;
+  const baselineProfit = baseRevenue - Math.round(baseDailyDemand * 21 * baseReturnRate * sku.price * 0.85) - holdingCost;
+  
+  // P&L result
+  const profitLoss: ProfitLossResult = {
+    grossRevenue,
+    returnCost,
+    holdingCost,
+    stockoutLoss: Math.round(totalStockoutLoss),
+    netProfit,
+    netProfitBaseline: baselineProfit,
+    profitDelta: netProfit - baselineProfit,
+    margin: grossRevenue > 0 ? parseFloat(((netProfit / grossRevenue) * 100).toFixed(1)) : 0,
+  };
+
+  // Return impact
+  const returnsByReason = returnReasonPool.slice(0, 4).map((reason) => ({
+    reason,
+    count: Math.round(totalReturns * (0.1 + rng() * 0.3)),
+    cost: Math.round(totalReturns * (0.1 + rng() * 0.3) * sku.price * 0.85),
+  }));
+  
+  const returnImpact: ReturnImpactResult = {
+    totalReturns,
+    returnCostDollars: returnCost,
+    effectiveReturnRate: totalDemand > 0 ? parseFloat((totalReturns / totalDemand).toFixed(3)) : 0,
+    returnsByReason,
+  };
 
   const storeImpacts = sku.stores.slice(0, 4).map((sid) => {
     const r2 = seeded(hashStr(sid + skuId + "simstore"));
@@ -376,27 +586,31 @@ export function simulateWhatIf(skuId: string, params: SimulationParams): Simulat
 
   return {
     stockoutTimeline: timeline,
-    revenueImpact: simRevenue,
-    revenueDelta: simRevenue - baseRevenue,
+    revenueImpact: grossRevenue,
+    revenueDelta: grossRevenue - baseRevenue,
     stockoutDay,
     storeImpacts,
+    profitLoss,
+    returnImpact,
+    forecastComparison,
+    confidenceInterval,
   };
 }
 
-// ─── Explainability ───────────────────────────────────────
+// ─── Explainability (ENHANCED) ───────────────────────────
 export function generateExplanation(skuId: string, context: string = "forecast"): Explanation {
   const rng = seeded(hashStr(skuId + "explain" + context));
   const sku = getSKU(skuId);
 
   const allFeatures: FeatureImportance[] = [
-    { feature: "Historical Sales Trend", importance: parseFloat((0.15 + rng() * 0.25).toFixed(2)), direction: "positive" },
-    { feature: "Seasonal Pattern",       importance: parseFloat((0.1 + rng() * 0.2).toFixed(2)),  direction: "positive" },
-    { feature: "Promotion Active",       importance: parseFloat((0.05 + rng() * 0.15).toFixed(2)), direction: "positive" },
-    { feature: "Festival Proximity",     importance: parseFloat((rng() * 0.2).toFixed(2)),         direction: rng() > 0.3 ? "positive" : "negative" },
-    { feature: "Social Signal Strength", importance: parseFloat((rng() * 0.15).toFixed(2)),        direction: "positive" },
-    { feature: "Weather Forecast",       importance: parseFloat((rng() * 0.1).toFixed(2)),         direction: rng() > 0.5 ? "positive" : "negative" },
-    { feature: "Return Rate History",    importance: parseFloat((0.05 + rng() * 0.1).toFixed(2)),  direction: "negative" },
-    { feature: "Competitor Pricing",     importance: parseFloat((rng() * 0.08).toFixed(2)),        direction: rng() > 0.5 ? "positive" : "negative" },
+    { feature: "Historical Sales Trend", importance: parseFloat((0.15 + rng() * 0.25).toFixed(2)), direction: "positive", description: `Strong upward trend with ${Math.round(5 + rng() * 15)}% growth over 30 days` },
+    { feature: "Seasonal Pattern",       importance: parseFloat((0.1 + rng() * 0.2).toFixed(2)),  direction: "positive", description: sku.seasonalPeak.length > 0 ? `Active seasonal peak: ${sku.seasonalPeak.join(", ")}` : "No active seasonal pattern detected" },
+    { feature: "Promotion Active",       importance: parseFloat((0.05 + rng() * 0.15).toFixed(2)), direction: "positive", description: `${rng() > 0.5 ? "Active promo driving +12% uplift" : "No active promotion — baseline demand"}` },
+    { feature: "Festival Proximity",     importance: parseFloat((rng() * 0.2).toFixed(2)),         direction: rng() > 0.3 ? "positive" : "negative", description: `${rng() > 0.5 ? "Festival within 2 weeks — demand surge expected" : "No upcoming festival impact"}` },
+    { feature: "Social Signal Strength", importance: parseFloat((rng() * 0.15).toFixed(2)),        direction: "positive", description: `Social mentions ${rng() > 0.5 ? "trending up 23%" : "stable at baseline levels"}` },
+    { feature: "Weather Forecast",       importance: parseFloat((rng() * 0.1).toFixed(2)),         direction: rng() > 0.5 ? "positive" : "negative", description: `${rng() > 0.5 ? "Favorable weather expected — outdoor activity up" : "Rain forecast may dampen foot traffic"}` },
+    { feature: "Return Rate History",    importance: parseFloat((0.05 + rng() * 0.1).toFixed(2)),  direction: "negative", description: `Past return rate of ${(sku.returnRiskBase * 100).toFixed(1)}% reduces effective demand` },
+    { feature: "Competitor Pricing",     importance: parseFloat((rng() * 0.08).toFixed(2)),        direction: rng() > 0.5 ? "positive" : "negative", description: `${rng() > 0.5 ? "Competitor prices higher — competitive advantage" : "Competitor running aggressive promotion"}` },
   ];
 
   allFeatures.sort((a, b) => b.importance - a.importance);
@@ -413,11 +627,203 @@ export function generateExplanation(skuId: string, context: string = "forecast")
   }
   narrative += `. Model confidence: ${(confidence * 100).toFixed(0)}%.`;
 
+  // ─── NEW: Confidence Breakdown
+  const dataQuality = parseFloat((0.7 + rng() * 0.25).toFixed(2));
+  const historicalConsistency = parseFloat((0.6 + rng() * 0.35).toFixed(2));
+  const varianceScore = parseFloat((0.5 + rng() * 0.4).toFixed(2));
+  const modelFit = parseFloat((0.65 + rng() * 0.3).toFixed(2));
+  const sampleSize = parseFloat((0.7 + rng() * 0.25).toFixed(2));
+
+  const segments: ConfidenceSegment[] = [
+    { label: "Data Quality", value: dataQuality, color: "217 91% 60%", description: `${Math.round(dataQuality * 100)}% — ${dataQuality > 0.8 ? "Excellent data completeness with minimal gaps" : "Some missing data points, but sufficient for prediction"}` },
+    { label: "Historical Consistency", value: historicalConsistency, color: "265 60% 62%", description: `${Math.round(historicalConsistency * 100)}% — ${historicalConsistency > 0.75 ? "Highly consistent historical patterns" : "Moderate variance in historical patterns"}` },
+    { label: "Variance", value: varianceScore, color: "152 69% 45%", description: `${Math.round(varianceScore * 100)}% — ${varianceScore > 0.7 ? "Low prediction variance" : "Moderate variance — wider confidence intervals"}` },
+    { label: "Model Fit", value: modelFit, color: "38 92% 50%", description: `${Math.round(modelFit * 100)}% — ${modelFit > 0.8 ? "Model fits observed data extremely well" : "Reasonable model fit with room for improvement"}` },
+    { label: "Sample Size", value: sampleSize, color: "340 70% 55%", description: `${Math.round(sampleSize * 100)}% — ${sampleSize > 0.8 ? "Large sample with 90+ days of data" : "Adequate sample size (60+ days)"}` },
+  ];
+
+  const confidenceBreakdown: ConfidenceBreakdown = {
+    overall: confidence,
+    dataQuality,
+    historicalConsistency,
+    varianceScore,
+    modelFit,
+    sampleSize,
+    segments,
+  };
+
+  // Natural language reasons
+  const naturalLanguageReasons: string[] = [];
+  topPositive.forEach(f => {
+    naturalLanguageReasons.push(`📈 ${f.feature}: ${f.description}`);
+  });
+  topNegative.forEach(f => {
+    naturalLanguageReasons.push(`📉 ${f.feature}: ${f.description}`);
+  });
+  if (sku.seasonalPeak.length > 0) {
+    naturalLanguageReasons.push(`🗓️ Seasonal factor: Product is in peak season (${sku.seasonalPeak.join(", ")})`);
+  }
+  naturalLanguageReasons.push(`🎯 Model confidence is ${confidence > 0.85 ? "very high" : confidence > 0.75 ? "high" : "moderate"} at ${(confidence * 100).toFixed(0)}%`);
+
   return {
     summary: `${context === "forecast" ? "Demand prediction" : "Risk assessment"} for ${sku.name}`,
     factors: top,
     confidence,
     narrative,
+    confidenceBreakdown,
+    predictionContext: context as "forecast" | "return_risk" | "inventory",
+    naturalLanguageReasons,
+  };
+}
+
+// ─── Dynamic Notifications (NEW) ──────────────────────────
+export function generateDynamicNotifications(): DynamicNotification[] {
+  const rng = seeded(Date.now ? 42 : 42); // deterministic for demo
+  const notifications: DynamicNotification[] = [];
+
+  skuCatalog.forEach((sku) => {
+    const skuRng = seeded(hashStr(sku.id + "notif"));
+    const forecast = generateDemandForecast(sku.id, 7);
+    const returnData = generateReturnAnalysis(sku.id);
+    const inventory = generateInventoryDecision(sku.id);
+    const intent = generateIntentAcceleration(sku.id);
+
+    // Rule 1: Demand spike detection (if actual > forecast by 20%+)
+    const spikeDay = forecast.find(f => f.actual && f.actual > f.predicted * 1.2);
+    if (spikeDay && skuRng() > 0.3) {
+      const deviation = spikeDay.actual! / spikeDay.predicted;
+      notifications.push({
+        id: `notif-spike-${sku.id}`,
+        type: "demand_spike",
+        priority: deviation > 1.4 ? "critical" : deviation > 1.25 ? "high" : "medium",
+        title: "Demand Surge Detected",
+        message: `${sku.name} demand is ${Math.round((deviation - 1) * 100)}% above forecast on ${spikeDay.date}. Consider increasing reorder quantity.`,
+        skuId: sku.id,
+        skuName: sku.name,
+        brand: sku.brand,
+        triggerCondition: "actual_demand > forecast * 1.20",
+        triggerValue: spikeDay.actual!,
+        threshold: Math.round(spikeDay.predicted * 1.2),
+        timestamp: `${Math.round(1 + skuRng() * 15)}m ago`,
+        isRead: skuRng() > 0.7,
+        actionSuggestion: `Increase reorder by ${Math.round(deviation * 20)}% and alert warehouse team`,
+        icon: "TrendingUp",
+        relatedView: "demand",
+      });
+    }
+
+    // Rule 2: Return anomaly (return rate > category avg by 50%+)
+    if (returnData.returnRate > returnData.categoryAvgReturn * 1.5 && skuRng() > 0.4) {
+      const severity = returnData.riskScore > 60 ? "critical" : returnData.riskScore > 40 ? "high" : "medium";
+      notifications.push({
+        id: `notif-return-${sku.id}`,
+        type: "return_anomaly",
+        priority: severity,
+        title: "Return Rate Anomaly",
+        message: `${sku.name} return rate (${(returnData.returnRate * 100).toFixed(1)}%) is ${Math.round((returnData.returnRate / returnData.categoryAvgReturn - 1) * 100)}% above ${sku.category} average. Top reason: ${returnData.reasons[0]?.reason || "Unknown"}.`,
+        skuId: sku.id,
+        skuName: sku.name,
+        brand: sku.brand,
+        triggerCondition: `return_rate > category_avg * 1.50`,
+        triggerValue: parseFloat((returnData.returnRate * 100).toFixed(1)),
+        threshold: parseFloat((returnData.categoryAvgReturn * 1.5 * 100).toFixed(1)),
+        timestamp: `${Math.round(5 + skuRng() * 30)}m ago`,
+        isRead: skuRng() > 0.6,
+        actionSuggestion: returnData.suggestedFixes[0] || "Review product listing and customer feedback",
+        icon: "Undo2",
+        relatedView: "returns",
+      });
+    }
+
+    // Rule 3: Stockout warning
+    if (inventory.daysUntilStockout < 5 && skuRng() > 0.3) {
+      notifications.push({
+        id: `notif-stockout-${sku.id}`,
+        type: "stockout_warning",
+        priority: inventory.daysUntilStockout <= 2 ? "critical" : "high",
+        title: "Stockout Imminent",
+        message: `${sku.name} will stock out in ${inventory.daysUntilStockout} days at current sell-through rate. ${inventory.currentStock} units remaining.`,
+        skuId: sku.id,
+        skuName: sku.name,
+        brand: sku.brand,
+        triggerCondition: "days_until_stockout < 5",
+        triggerValue: inventory.daysUntilStockout,
+        threshold: 5,
+        timestamp: `${Math.round(1 + skuRng() * 10)}m ago`,
+        isRead: false,
+        actionSuggestion: `Emergency reorder ${inventory.reorderQty} units immediately`,
+        icon: "AlertTriangle",
+        relatedView: "inventory",
+      });
+    }
+
+    // Rule 4: Overstock alert
+    if (inventory.overstockRisk > 0.6 && skuRng() > 0.5) {
+      notifications.push({
+        id: `notif-overstock-${sku.id}`,
+        type: "overstock_alert",
+        priority: "medium",
+        title: "Overstock Risk",
+        message: `${sku.name} has ${inventory.daysUntilStockout} days of supply — ${Math.round(inventory.overstockRisk * 100)}% overstock risk. Consider promotional pricing.`,
+        skuId: sku.id,
+        skuName: sku.name,
+        brand: sku.brand,
+        triggerCondition: "overstock_risk > 0.60",
+        triggerValue: parseFloat((inventory.overstockRisk * 100).toFixed(1)),
+        threshold: 60,
+        timestamp: `${Math.round(10 + skuRng() * 45)}m ago`,
+        isRead: skuRng() > 0.5,
+        actionSuggestion: "Consider markdown strategy or cross-store transfer",
+        icon: "Package",
+        relatedView: "inventory",
+      });
+    }
+
+    // Rule 5: Intent surge (pre-spike pattern)
+    if (intent.spikePredicted && skuRng() > 0.4) {
+      notifications.push({
+        id: `notif-intent-${sku.id}`,
+        type: "intent_surge",
+        priority: intent.confidence > 0.7 ? "high" : "medium",
+        title: "Intent Spike Detected",
+        message: `${sku.name} showing pre-spike behavior — saves up ${Math.round(intent.signals[0]?.changePercent || 15)}%, predicted spike in ${intent.timeToSpike}.`,
+        skuId: sku.id,
+        skuName: sku.name,
+        brand: sku.brand,
+        triggerCondition: "intent_confidence > 0.50 && spike_predicted",
+        triggerValue: parseFloat((intent.confidence * 100).toFixed(1)),
+        threshold: 50,
+        timestamp: `${Math.round(2 + skuRng() * 20)}m ago`,
+        isRead: skuRng() > 0.5,
+        actionSuggestion: "Pre-position stock and prepare for demand surge",
+        icon: "Zap",
+        relatedView: "signals",
+      });
+    }
+  });
+
+  // Sort by priority
+  const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+  notifications.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
+
+  return notifications;
+}
+
+export function getNotificationSummary(notifications: DynamicNotification[]): NotificationSummary {
+  const byType: Record<DynamicNotification["type"], number> = {
+    demand_spike: 0, return_anomaly: 0, stockout_warning: 0,
+    overstock_alert: 0, forecast_drift: 0, intent_surge: 0,
+  };
+  notifications.forEach(n => { byType[n.type] = (byType[n.type] || 0) + 1; });
+
+  return {
+    total: notifications.length,
+    unread: notifications.filter(n => !n.isRead).length,
+    critical: notifications.filter(n => n.priority === "critical").length,
+    high: notifications.filter(n => n.priority === "high").length,
+    medium: notifications.filter(n => n.priority === "medium").length,
+    low: notifications.filter(n => n.priority === "low").length,
+    byType,
   };
 }
 

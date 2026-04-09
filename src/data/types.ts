@@ -98,11 +98,31 @@ export interface ReturnAnalysis {
   skuId: string;
   returnRate: number;
   riskScore: number;      // 0–100
+  riskLabel: "Low" | "Medium" | "High";
   reasons: ReturnReason[];
   suggestedFixes: string[];
   phantomDemandGap: number;
   trueDemand: number;
   reportedDemand: number;
+  // ─── NEW: Return Risk Prediction ───
+  riskFactors: ReturnRiskFactor[];
+  returnExplanation: string;      // Natural language explanation
+  categoryAvgReturn: number;      // Category average return rate
+  historicalTrend: ReturnTrendPoint[];  // 6-month return trend
+}
+
+export interface ReturnRiskFactor {
+  name: string;
+  weight: number;       // 0–1 contribution
+  value: string;        // display value
+  impact: "high" | "medium" | "low";
+  direction: "increases_risk" | "decreases_risk";
+}
+
+export interface ReturnTrendPoint {
+  month: string;
+  rate: number;
+  volume: number;
 }
 
 // ─── Inventory Decision ────────────────────────────────────
@@ -131,6 +151,10 @@ export interface SimulationParams {
   returnRateAdj: number;     // -50 to +50 %
   festivalActive: boolean;
   promotionIntensity: number; // 0–100
+  // ─── NEW: Enhanced simulation params ───
+  demandFluctuation: number;   // 0–100 (variance %)
+  seasonalityMode: "none" | "spring" | "summer" | "holiday" | "back-to-school";
+  externalTrendFactor: number; // -50 to +50  
 }
 
 export interface SimulationResult {
@@ -139,6 +163,36 @@ export interface SimulationResult {
   revenueDelta: number;
   stockoutDay: number | null;
   storeImpacts: { store: string; status: string; daysSupply: number }[];
+  // ─── NEW: Enhanced simulation results ───
+  profitLoss: ProfitLossResult;
+  returnImpact: ReturnImpactResult;
+  forecastComparison: ForecastComparisonPoint[];
+  confidenceInterval: { day: string; lower: number; upper: number; mean: number }[];
+}
+
+export interface ProfitLossResult {
+  grossRevenue: number;
+  returnCost: number;
+  holdingCost: number;
+  stockoutLoss: number;
+  netProfit: number;
+  netProfitBaseline: number;
+  profitDelta: number;
+  margin: number;
+}
+
+export interface ReturnImpactResult {
+  totalReturns: number;
+  returnCostDollars: number;
+  effectiveReturnRate: number;
+  returnsByReason: { reason: string; count: number; cost: number }[];
+}
+
+export interface ForecastComparisonPoint {
+  day: string;
+  baseline: number;
+  simulated: number;
+  returnAdjusted: number;
 }
 
 // ─── Explainability ────────────────────────────────────────
@@ -146,6 +200,7 @@ export interface FeatureImportance {
   feature: string;
   importance: number;   // 0–1
   direction: "positive" | "negative";
+  description: string;   // NEW: human-readable explanation
 }
 
 export interface Explanation {
@@ -153,6 +208,57 @@ export interface Explanation {
   factors: FeatureImportance[];
   confidence: number;
   narrative: string;     // full natural language
+  // ─── NEW: Enhanced explainability ───
+  confidenceBreakdown: ConfidenceBreakdown;
+  predictionContext: "forecast" | "return_risk" | "inventory";
+  naturalLanguageReasons: string[];   // bullet-point reasons
+}
+
+export interface ConfidenceBreakdown {
+  overall: number;       // 0–1
+  dataQuality: number;   // 0–1
+  historicalConsistency: number;  // 0–1
+  varianceScore: number; // 0–1
+  modelFit: number;      // 0–1
+  sampleSize: number;    // 0–1 (normalized)
+  segments: ConfidenceSegment[];
+}
+
+export interface ConfidenceSegment {
+  label: string;
+  value: number;     // 0–1
+  color: string;     // HSL
+  description: string;
+}
+
+// ─── Dynamic Notifications ─────────────────────────────────
+export interface DynamicNotification {
+  id: string;
+  type: "demand_spike" | "return_anomaly" | "stockout_warning" | "overstock_alert" | "forecast_drift" | "intent_surge";
+  priority: "low" | "medium" | "high" | "critical";
+  title: string;
+  message: string;
+  skuId: string;
+  skuName: string;
+  brand: string;
+  triggerCondition: string;    // human-readable rule
+  triggerValue: number;        // actual metric value
+  threshold: number;           // threshold that was exceeded
+  timestamp: string;
+  isRead: boolean;
+  actionSuggestion: string;
+  icon: string;                // lucide icon name
+  relatedView: DashboardView;  // which view to navigate to
+}
+
+export interface NotificationSummary {
+  total: number;
+  unread: number;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  byType: Record<DynamicNotification["type"], number>;
 }
 
 // ─── Orchestrator ──────────────────────────────────────────

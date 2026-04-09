@@ -1,6 +1,7 @@
+import { useState } from "react";
 import {
   AreaChart, Area, Line, XAxis, YAxis,
-  Tooltip, ResponsiveContainer, ReferenceLine,
+  Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid,
 } from "recharts";
 import type { ForecastPoint, DemandDecomposition } from "@/data/types";
 
@@ -13,8 +14,61 @@ const DemandView = ({
   decomposition: DemandDecomposition[];
   skuName: string;
 }) => {
+  const [showConfidence, setShowConfidence] = useState(true);
+  const [showActual, setShowActual] = useState(true);
+  const [showPredicted, setShowPredicted] = useState(true);
+
   const latest = decomposition[decomposition.length - 1];
   const totalPredicted = forecast.reduce((s, f) => s + f.predicted, 0);
+  const totalActual = forecast.reduce((s, f) => s + (f.actual || 0), 0);
+  const accuracy = totalActual > 0 ? ((1 - Math.abs(totalPredicted - totalActual) / totalActual) * 100) : 0;
+
+  // Custom tooltip
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload) return null;
+    return (
+      <div className="bg-[hsl(225,15%,9%)] border border-[hsl(225,12%,16%)] rounded-xl p-3 shadow-2xl shadow-black/50">
+        <p className="text-[10px] text-muted-foreground/50 mb-2">{label}</p>
+        {payload.map((entry: any, i: number) => {
+          if (entry.value === undefined || entry.value === null) return null;
+          const colors: Record<string, string> = {
+            actual: "text-primary",
+            predicted: "text-purple-400",
+            upper: "text-purple-300/50",
+            lower: "text-purple-300/50",
+          };
+          const labels: Record<string, string> = {
+            actual: "Actual",
+            predicted: "Forecast",
+            upper: "Upper CI",
+            lower: "Lower CI",
+          };
+          return (
+            <div key={i} className="flex items-center justify-between gap-4">
+              <span className="text-[10px] text-muted-foreground">{labels[entry.dataKey] || entry.dataKey}</span>
+              <span className={`text-[11px] font-mono-data font-semibold ${colors[entry.dataKey] || "text-foreground"}`}>
+                {Math.round(entry.value)}
+              </span>
+            </div>
+          );
+        })}
+        {/* Show deviation if both actual and predicted exist */}
+        {payload.length >= 2 && payload[0]?.value && payload.find((p: any) => p.dataKey === "predicted")?.value && (
+          <div className="mt-2 pt-2 border-t border-border/20">
+            <span className="text-[9px] text-muted-foreground/40">
+              Deviation: {(() => {
+                const actual = payload.find((p: any) => p.dataKey === "actual")?.value;
+                const predicted = payload.find((p: any) => p.dataKey === "predicted")?.value;
+                if (!actual || !predicted) return "N/A";
+                const pct = ((actual - predicted) / predicted * 100).toFixed(1);
+                return `${Number(pct) > 0 ? "+" : ""}${pct}%`;
+              })()}
+            </span>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6 animate-slide-up">
@@ -34,21 +88,56 @@ const DemandView = ({
         </div>
       </div>
 
+      {/* ─── Chart overlay controls ─── */}
+      <div className="flex items-center gap-4">
+        <span className="text-[10px] text-muted-foreground/40">Overlays:</span>
+        {[
+          { key: "actual", label: "Actual", color: "bg-primary", state: showActual, setter: setShowActual },
+          { key: "predicted", label: "Forecast", color: "bg-purple-500", state: showPredicted, setter: setShowPredicted },
+          { key: "confidence", label: "Confidence Band", color: "bg-purple-500/30", state: showConfidence, setter: setShowConfidence },
+        ].map(toggle => (
+          <button
+            key={toggle.key}
+            onClick={() => toggle.setter(!toggle.state)}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all ${
+              toggle.state
+                ? "bg-secondary/40 text-foreground"
+                : "text-muted-foreground/40 hover:text-muted-foreground"
+            }`}
+          >
+            <div className={`w-2.5 h-2.5 rounded-sm ${toggle.color} ${!toggle.state ? "opacity-30" : ""}`} />
+            {toggle.label}
+          </button>
+        ))}
+        {/* Accuracy */}
+        <div className="ml-auto flex items-center gap-1.5">
+          <span className="text-[10px] text-muted-foreground/40">Accuracy</span>
+          <span className={`text-[11px] font-mono-data font-semibold ${accuracy > 90 ? "text-emerald-400" : accuracy > 80 ? "text-amber-400" : "text-destructive"}`}>
+            {accuracy.toFixed(1)}%
+          </span>
+        </div>
+      </div>
+
       {/* ─── Full-bleed forecast chart ─── */}
       <div className="relative -mx-6">
         <div className="h-[320px] w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={forecast} margin={{ top: 20, right: 0, left: 0, bottom: 0 }}>
+            <AreaChart data={forecast} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="forecastGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="hsl(217 91% 60%)" stopOpacity={0.15} />
                   <stop offset="100%" stopColor="hsl(217 91% 60%)" stopOpacity={0} />
                 </linearGradient>
-                <linearGradient id="confBand" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="hsl(265 60% 62%)" stopOpacity={0.06} />
-                  <stop offset="100%" stopColor="hsl(265 60% 62%)" stopOpacity={0} />
+                <linearGradient id="confBandUpper" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="hsl(265 60% 62%)" stopOpacity={0.12} />
+                  <stop offset="100%" stopColor="hsl(265 60% 62%)" stopOpacity={0.02} />
+                </linearGradient>
+                <linearGradient id="confBandLower" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="hsl(265 60% 62%)" stopOpacity={0.02} />
+                  <stop offset="100%" stopColor="hsl(265 60% 62%)" stopOpacity={0.08} />
                 </linearGradient>
               </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(225 12% 14%)" vertical={false} />
               <XAxis
                 dataKey="date"
                 tick={{ fontSize: 10, fill: "hsl(220 10% 36%)" }}
@@ -56,53 +145,72 @@ const DemandView = ({
                 tickLine={false}
                 dy={8}
               />
-              <YAxis hide />
-              <Tooltip
-                contentStyle={{
-                  background: "hsl(225 15% 9%)",
-                  border: "1px solid hsl(225 12% 16%)",
-                  borderRadius: "10px",
-                  fontSize: "11px",
-                  boxShadow: "0 8px 32px -8px rgba(0,0,0,0.5)",
-                }}
-                labelStyle={{ color: "hsl(220 10% 46%)", fontSize: "10px" }}
+              <YAxis 
+                tick={{ fontSize: 9, fill: "hsl(220 10% 36%)" }}
+                axisLine={false}
+                tickLine={false}
               />
+              <Tooltip content={<CustomTooltip />} />
+              
               {/* Confidence band */}
-              <Area type="monotone" dataKey="upper" stroke="none" fill="url(#confBand)" />
-              <Area type="monotone" dataKey="lower" stroke="none" fill="transparent" />
+              {showConfidence && (
+                <>
+                  <Area type="monotone" dataKey="upper" stroke="hsl(265 60% 62% / 0.2)" strokeWidth={1} strokeDasharray="2 2" fill="url(#confBandUpper)" name="Upper CI" />
+                  <Area type="monotone" dataKey="lower" stroke="hsl(265 60% 62% / 0.2)" strokeWidth={1} strokeDasharray="2 2" fill="url(#confBandLower)" name="Lower CI" />
+                </>
+              )}
+              
               {/* Actual */}
-              <Area
-                type="monotone"
-                dataKey="actual"
-                stroke="hsl(217 91% 60%)"
-                strokeWidth={2}
-                fill="url(#forecastGrad)"
-                dot={false}
-                activeDot={{ r: 4, fill: "hsl(217 91% 60%)", stroke: "hsl(228 14% 5%)", strokeWidth: 2 }}
-                connectNulls={false}
-              />
+              {showActual && (
+                <Area
+                  type="monotone"
+                  dataKey="actual"
+                  stroke="hsl(217 91% 60%)"
+                  strokeWidth={2.5}
+                  fill="url(#forecastGrad)"
+                  dot={false}
+                  activeDot={{ r: 5, fill: "hsl(217 91% 60%)", stroke: "hsl(228 14% 5%)", strokeWidth: 2 }}
+                  connectNulls={false}
+                  name="Actual"
+                />
+              )}
+              
               {/* Predicted */}
-              <Line
-                type="monotone"
-                dataKey="predicted"
-                stroke="hsl(265 60% 62%)"
-                strokeWidth={1.5}
-                strokeDasharray="4 4"
-                dot={false}
-              />
+              {showPredicted && (
+                <Line
+                  type="monotone"
+                  dataKey="predicted"
+                  stroke="hsl(265 60% 62%)"
+                  strokeWidth={2}
+                  strokeDasharray="6 3"
+                  dot={false}
+                  activeDot={{ r: 4, fill: "hsl(265 60% 62%)", stroke: "hsl(228 14% 5%)", strokeWidth: 2 }}
+                  name="Forecast"
+                />
+              )}
             </AreaChart>
           </ResponsiveContainer>
         </div>
-        {/* Chart legend */}
+        {/* Updated chart legend */}
         <div className="absolute top-4 left-8 flex items-center gap-5">
-          <div className="flex items-center gap-1.5">
-            <div className="w-5 h-[2px] bg-primary rounded-full" />
-            <span className="text-[10px] text-muted-foreground">Actual</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-5 h-[2px] rounded-full" style={{ background: "hsl(265 60% 62%)", opacity: 0.7 }} />
-            <span className="text-[10px] text-muted-foreground">Predicted</span>
-          </div>
+          {showActual && (
+            <div className="flex items-center gap-1.5">
+              <div className="w-5 h-[2.5px] bg-primary rounded-full" />
+              <span className="text-[10px] text-muted-foreground">Actual</span>
+            </div>
+          )}
+          {showPredicted && (
+            <div className="flex items-center gap-1.5">
+              <div className="w-5 h-[2px] rounded-full" style={{ background: "hsl(265 60% 62%)", opacity: 0.7 }} />
+              <span className="text-[10px] text-muted-foreground">Forecast</span>
+            </div>
+          )}
+          {showConfidence && (
+            <div className="flex items-center gap-1.5">
+              <div className="w-5 h-3 rounded-sm bg-purple-500/10 border border-purple-500/20" />
+              <span className="text-[10px] text-muted-foreground">95% CI</span>
+            </div>
+          )}
         </div>
       </div>
 

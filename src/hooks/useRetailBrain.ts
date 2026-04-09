@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from "react";
-import type { DashboardView, SimulationParams } from "@/data/types";
+import type { DashboardView, SimulationParams, DynamicNotification } from "@/data/types";
 import { skuCatalog, brands } from "@/data/brands";
 import {
   generateDemandForecast,
@@ -14,6 +14,8 @@ import {
   generateAlerts,
   generateSKUPriorities,
   generateKPIs,
+  generateDynamicNotifications,
+  getNotificationSummary,
 } from "@/data/generators";
 
 const defaultSimParams: SimulationParams = {
@@ -21,6 +23,9 @@ const defaultSimParams: SimulationParams = {
   returnRateAdj: 0,
   festivalActive: false,
   promotionIntensity: 0,
+  demandFluctuation: 15,
+  seasonalityMode: "none",
+  externalTrendFactor: 0,
 };
 
 export function useRetailBrain() {
@@ -29,6 +34,8 @@ export function useRetailBrain() {
   const [selectedBrand, setSelectedBrand] = useState<string>("all");
   const [simParams, setSimParams] = useState<SimulationParams>(defaultSimParams);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [notifications, setNotifications] = useState<DynamicNotification[]>(() => generateDynamicNotifications());
+  const [showNotifications, setShowNotifications] = useState(false);
 
   // Filtered SKUs by brand
   const filteredSKUs = useMemo(() => {
@@ -46,9 +53,11 @@ export function useRetailBrain() {
   const inventoryDecision = useMemo(() => generateInventoryDecision(selectedSKU), [selectedSKU]);
   const simulation = useMemo(() => simulateWhatIf(selectedSKU, simParams), [selectedSKU, simParams]);
   const explanation = useMemo(() => generateExplanation(selectedSKU), [selectedSKU]);
+  const returnExplanation = useMemo(() => generateExplanation(selectedSKU, "return_risk"), [selectedSKU]);
   const alerts = useMemo(() => generateAlerts(), []);
   const priorities = useMemo(() => generateSKUPriorities(), []);
   const kpis = useMemo(() => generateKPIs(), []);
+  const notificationSummary = useMemo(() => getNotificationSummary(notifications), [notifications]);
 
   const selectSKUAndNavigate = useCallback((skuId: string) => {
     setSelectedSKU(skuId);
@@ -58,6 +67,27 @@ export function useRetailBrain() {
   const toggleSidebar = useCallback(() => {
     setSidebarCollapsed((prev) => !prev);
   }, []);
+
+  const markNotificationRead = useCallback((notifId: string) => {
+    setNotifications(prev => prev.map(n => 
+      n.id === notifId ? { ...n, isRead: true } : n
+    ));
+  }, []);
+
+  const markAllNotificationsRead = useCallback(() => {
+    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+  }, []);
+
+  const dismissNotification = useCallback((notifId: string) => {
+    setNotifications(prev => prev.filter(n => n.id !== notifId));
+  }, []);
+
+  const navigateToNotification = useCallback((notif: DynamicNotification) => {
+    markNotificationRead(notif.id);
+    setSelectedSKU(notif.skuId);
+    setActiveView(notif.relatedView);
+    setShowNotifications(false);
+  }, [markNotificationRead]);
 
   return {
     // State
@@ -71,6 +101,8 @@ export function useRetailBrain() {
     setSimParams,
     sidebarCollapsed,
     toggleSidebar,
+    showNotifications,
+    setShowNotifications,
 
     // Computed
     filteredSKUs,
@@ -87,12 +119,19 @@ export function useRetailBrain() {
     inventoryDecision,
     simulation,
     explanation,
+    returnExplanation,
     alerts,
     priorities,
     kpis,
+    notifications,
+    notificationSummary,
 
     // Actions
     selectSKUAndNavigate,
+    markNotificationRead,
+    markAllNotificationsRead,
+    dismissNotification,
+    navigateToNotification,
   };
 }
 

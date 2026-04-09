@@ -1,11 +1,11 @@
 import { useState, useMemo } from "react";
 import {
-  AreaChart, Area, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer,
+  AreaChart, Area, Line, XAxis, YAxis, CartesianGrid, ComposedChart, Bar,
+  Tooltip, ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { FlaskConical, DollarSign, AlertTriangle, Calendar } from "lucide-react";
+import { FlaskConical, DollarSign, AlertTriangle, Calendar, Undo2, TrendingUp, TrendingDown, ArrowUp, ArrowDown, ChevronDown, ChevronUp } from "lucide-react";
 import type { SimulationParams, SimulationResult } from "@/data/types";
 
 const SimulationPanel = ({
@@ -22,6 +22,9 @@ const SimulationPanel = ({
   const update = (partial: Partial<SimulationParams>) => {
     onParamsChange({ ...params, ...partial });
   };
+  const [showPL, setShowPL] = useState(false);
+
+  const pnl = result.profitLoss;
 
   return (
     <div className="space-y-5">
@@ -32,7 +35,7 @@ const SimulationPanel = ({
           </div>
           <div>
             <h3 className="text-sm font-semibold text-foreground">What-If Simulation Engine</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">{skuName} — adjust parameters and see impact</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{skuName} — probabilistic modeling</p>
           </div>
         </div>
 
@@ -76,6 +79,24 @@ const SimulationPanel = ({
             </div>
           </div>
 
+          {/* Demand Fluctuation (NEW) */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs text-muted-foreground font-medium">Demand Variance</label>
+              <span className="text-lg font-bold text-foreground tabular-nums">{params.demandFluctuation || 15}%</span>
+            </div>
+            <Slider
+              value={[params.demandFluctuation || 15]}
+              onValueChange={([v]) => update({ demandFluctuation: v })}
+              min={0}
+              max={60}
+              step={5}
+            />
+            <div className="flex justify-between mt-1 text-[10px] text-muted-foreground">
+              <span>Stable</span><span>Volatile</span>
+            </div>
+          </div>
+
           {/* Promotion Intensity */}
           <div>
             <div className="flex items-center justify-between mb-2">
@@ -107,6 +128,26 @@ const SimulationPanel = ({
               checked={params.festivalActive}
               onCheckedChange={(checked) => update({ festivalActive: checked })}
             />
+          </div>
+
+          {/* Seasonality (NEW) */}
+          <div className="p-4 rounded-xl bg-secondary/30 border border-border/20">
+            <p className="text-xs font-medium text-foreground mb-2">Seasonality Mode</p>
+            <div className="flex flex-wrap gap-1.5">
+              {(["none", "spring", "summer", "holiday", "back-to-school"] as const).map(mode => (
+                <button
+                  key={mode}
+                  onClick={() => update({ seasonalityMode: mode })}
+                  className={`px-2 py-1 rounded-md text-[10px] font-medium transition-all ${
+                    (params.seasonalityMode || "none") === mode
+                      ? "bg-primary/20 text-primary"
+                      : "text-muted-foreground/60 hover:text-foreground bg-secondary/30"
+                  }`}
+                >
+                  {mode === "none" ? "None" : mode === "back-to-school" ? "BTS" : mode.charAt(0).toUpperCase() + mode.slice(1)}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -150,18 +191,16 @@ const SimulationPanel = ({
           <div className="rounded-xl bg-secondary/30 border border-border/20 p-3">
             <DollarSign className="w-4 h-4 text-emerald-400 mb-1.5" />
             <p className="text-lg font-bold text-foreground tabular-nums">
-              ${(result.revenueImpact / 1000).toFixed(0)}k
+              ${(pnl.grossRevenue / 1000).toFixed(0)}k
             </p>
-            <p className="text-[10px] text-muted-foreground">Projected Revenue</p>
+            <p className="text-[10px] text-muted-foreground">Gross Revenue</p>
           </div>
           <div className="rounded-xl bg-secondary/30 border border-border/20 p-3">
-            <DollarSign className="w-4 h-4 text-primary mb-1.5" />
-            <p className={`text-lg font-bold tabular-nums ${
-              result.revenueDelta >= 0 ? "text-emerald-400" : "text-destructive"
-            }`}>
-              {result.revenueDelta >= 0 ? "+" : ""}${(result.revenueDelta / 1000).toFixed(0)}k
+            <Undo2 className="w-4 h-4 text-destructive mb-1.5" />
+            <p className="text-lg font-bold text-destructive tabular-nums">
+              -${(pnl.returnCost / 1000).toFixed(0)}k
             </p>
-            <p className="text-[10px] text-muted-foreground">Revenue Delta</p>
+            <p className="text-[10px] text-muted-foreground">Return Cost</p>
           </div>
           <div className="rounded-xl bg-secondary/30 border border-border/20 p-3">
             <AlertTriangle className={`w-4 h-4 mb-1.5 ${result.stockoutDay ? "text-destructive" : "text-emerald-400"}`} />
@@ -171,9 +210,11 @@ const SimulationPanel = ({
             <p className="text-[10px] text-muted-foreground">Stockout Day</p>
           </div>
           <div className="rounded-xl bg-secondary/30 border border-border/20 p-3">
-            <Calendar className="w-4 h-4 text-amber-400 mb-1.5" />
-            <p className="text-lg font-bold text-foreground tabular-nums">21</p>
-            <p className="text-[10px] text-muted-foreground">Simulation Days</p>
+            {pnl.profitDelta >= 0 ? <ArrowUp className="w-4 h-4 text-emerald-400 mb-1.5" /> : <ArrowDown className="w-4 h-4 text-destructive mb-1.5" />}
+            <p className={`text-lg font-bold tabular-nums ${pnl.profitDelta >= 0 ? "text-emerald-400" : "text-destructive"}`}>
+              {pnl.profitDelta >= 0 ? "+" : ""}${(pnl.profitDelta / 1000).toFixed(0)}k
+            </p>
+            <p className="text-[10px] text-muted-foreground">P/L vs Baseline</p>
           </div>
         </div>
       </div>

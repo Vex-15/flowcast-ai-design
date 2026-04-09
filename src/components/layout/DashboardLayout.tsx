@@ -1,7 +1,7 @@
 import { ReactNode } from "react";
-import { Bell } from "lucide-react";
 import Sidebar from "./Sidebar";
 import type { RetailBrainState } from "@/hooks/useRetailBrain";
+import NotificationCenter, { NotificationBell } from "@/components/notifications/NotificationCenter";
 
 interface DashboardLayoutProps {
   brain: RetailBrainState;
@@ -37,16 +37,11 @@ const DashboardLayout = ({ brain, children }: DashboardLayoutProps) => {
             ))}
           </select>
 
-          <button className="relative w-8 h-8 rounded-lg flex items-center justify-center
-            hover:bg-secondary/50 transition-all group">
-            <Bell className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground transition-colors" />
-            {brain.alerts.filter((a) => a.severity === "critical").length > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-destructive text-[8px] font-bold
-                flex items-center justify-center text-white">
-                {brain.alerts.filter((a) => a.severity === "critical").length}
-              </span>
-            )}
-          </button>
+          {/* Dynamic Notification Bell */}
+          <NotificationBell
+            summary={brain.notificationSummary}
+            onClick={() => brain.setShowNotifications(true)}
+          />
         </header>
 
         {/* Content */}
@@ -54,6 +49,18 @@ const DashboardLayout = ({ brain, children }: DashboardLayoutProps) => {
           {children}
         </main>
       </div>
+
+      {/* Notification Center Overlay */}
+      <NotificationCenter
+        notifications={brain.notifications}
+        summary={brain.notificationSummary}
+        onMarkRead={brain.markNotificationRead}
+        onMarkAllRead={brain.markAllNotificationsRead}
+        onDismiss={brain.dismissNotification}
+        onNavigate={brain.navigateToNotification}
+        isOpen={brain.showNotifications}
+        onClose={() => brain.setShowNotifications(false)}
+      />
     </div>
   );
 };
