@@ -1,0 +1,99 @@
+import { useState, useMemo, useCallback } from "react";
+import type { DashboardView, SimulationParams } from "@/data/types";
+import { skuCatalog, brands } from "@/data/brands";
+import {
+  generateDemandForecast,
+  generateDemandDecomposition,
+  generateAnomalies,
+  generateSignalFusion,
+  generateIntentAcceleration,
+  generateReturnAnalysis,
+  generateInventoryDecision,
+  simulateWhatIf,
+  generateExplanation,
+  generateAlerts,
+  generateSKUPriorities,
+  generateKPIs,
+} from "@/data/generators";
+
+const defaultSimParams: SimulationParams = {
+  demandMultiplier: 1.0,
+  returnRateAdj: 0,
+  festivalActive: false,
+  promotionIntensity: 0,
+};
+
+export function useRetailBrain() {
+  const [activeView, setActiveView] = useState<DashboardView>("executive");
+  const [selectedSKU, setSelectedSKU] = useState(skuCatalog[0].id);
+  const [selectedBrand, setSelectedBrand] = useState<string>("all");
+  const [simParams, setSimParams] = useState<SimulationParams>(defaultSimParams);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Filtered SKUs by brand
+  const filteredSKUs = useMemo(() => {
+    if (selectedBrand === "all") return skuCatalog;
+    return skuCatalog.filter((s) => s.brand === selectedBrand);
+  }, [selectedBrand]);
+
+  // All module data for selected SKU
+  const forecast = useMemo(() => generateDemandForecast(selectedSKU), [selectedSKU]);
+  const decomposition = useMemo(() => generateDemandDecomposition(selectedSKU), [selectedSKU]);
+  const anomalies = useMemo(() => generateAnomalies(selectedSKU), [selectedSKU]);
+  const signalFusion = useMemo(() => generateSignalFusion(selectedSKU), [selectedSKU]);
+  const intentAcceleration = useMemo(() => generateIntentAcceleration(selectedSKU), [selectedSKU]);
+  const returnAnalysis = useMemo(() => generateReturnAnalysis(selectedSKU), [selectedSKU]);
+  const inventoryDecision = useMemo(() => generateInventoryDecision(selectedSKU), [selectedSKU]);
+  const simulation = useMemo(() => simulateWhatIf(selectedSKU, simParams), [selectedSKU, simParams]);
+  const explanation = useMemo(() => generateExplanation(selectedSKU), [selectedSKU]);
+  const alerts = useMemo(() => generateAlerts(), []);
+  const priorities = useMemo(() => generateSKUPriorities(), []);
+  const kpis = useMemo(() => generateKPIs(), []);
+
+  const selectSKUAndNavigate = useCallback((skuId: string) => {
+    setSelectedSKU(skuId);
+    setActiveView("sku-deep-dive");
+  }, []);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => !prev);
+  }, []);
+
+  return {
+    // State
+    activeView,
+    setActiveView,
+    selectedSKU,
+    setSelectedSKU,
+    selectedBrand,
+    setSelectedBrand,
+    simParams,
+    setSimParams,
+    sidebarCollapsed,
+    toggleSidebar,
+
+    // Computed
+    filteredSKUs,
+    brands,
+    currentSKU: skuCatalog.find((s) => s.id === selectedSKU) || skuCatalog[0],
+
+    // Module data
+    forecast,
+    decomposition,
+    anomalies,
+    signalFusion,
+    intentAcceleration,
+    returnAnalysis,
+    inventoryDecision,
+    simulation,
+    explanation,
+    alerts,
+    priorities,
+    kpis,
+
+    // Actions
+    selectSKUAndNavigate,
+  };
+}
+
+export type RetailBrainState = ReturnType<typeof useRetailBrain>;
