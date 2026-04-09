@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import {
   AreaChart, Area, Line, XAxis, YAxis,
   Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid,
@@ -17,10 +17,22 @@ const DemandView = ({
   const [showConfidence, setShowConfidence] = useState(true);
   const [showActual, setShowActual] = useState(true);
   const [showPredicted, setShowPredicted] = useState(true);
+  const [horizon, setHorizon] = useState<7 | 14>(14);
+
+  // Filter forecast data by selected horizon
+  const filteredForecast = useMemo(() => forecast.slice(0, horizon), [forecast, horizon]);
+
+  // Find the "today" boundary — last data point that has an actual value
+  const todayDate = useMemo(() => {
+    for (let i = filteredForecast.length - 1; i >= 0; i--) {
+      if (filteredForecast[i].actual !== undefined) return filteredForecast[i].date;
+    }
+    return null;
+  }, [filteredForecast]);
 
   const latest = decomposition[decomposition.length - 1];
-  const totalPredicted = forecast.reduce((s, f) => s + f.predicted, 0);
-  const totalActual = forecast.reduce((s, f) => s + (f.actual || 0), 0);
+  const totalPredicted = filteredForecast.reduce((s, f) => s + f.predicted, 0);
+  const totalActual = filteredForecast.reduce((s, f) => s + (f.actual || 0), 0);
   const accuracy = totalActual > 0 ? ((1 - Math.abs(totalPredicted - totalActual) / totalActual) * 100) : 0;
 
   // Custom tooltip
@@ -80,11 +92,29 @@ const DemandView = ({
           </h1>
           <p className="text-xs text-muted-foreground mt-1">{skuName}</p>
         </div>
-        <div className="text-right">
-          <p className="text-4xl font-light tracking-tighter text-foreground font-mono-data leading-none">
-            {totalPredicted.toLocaleString()}
-          </p>
-          <p className="label-micro text-[9px] mt-1">14-DAY PREDICTED UNITS</p>
+        <div className="flex items-center gap-6">
+          {/* Forecast Horizon Toggle */}
+          <div className="flex items-center rounded-xl bg-secondary/20 border border-border/15 p-0.5">
+            {([7, 14] as const).map((d) => (
+              <button
+                key={d}
+                onClick={() => setHorizon(d)}
+                className={`px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-all duration-200 ${
+                  horizon === d
+                    ? "bg-primary/15 text-primary shadow-sm shadow-primary/10 border border-primary/20"
+                    : "text-muted-foreground/50 hover:text-muted-foreground"
+                }`}
+              >
+                {d} Days
+              </button>
+            ))}
+          </div>
+          <div className="text-right">
+            <p className="text-4xl font-light tracking-tighter text-foreground font-mono-data leading-none">
+              {totalPredicted.toLocaleString()}
+            </p>
+            <p className="label-micro text-[9px] mt-1">{horizon}-DAY PREDICTED UNITS</p>
+          </div>
         </div>
       </div>
 
@@ -122,7 +152,7 @@ const DemandView = ({
       <div className="relative -mx-6">
         <div className="h-[320px] w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={forecast} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
+            <AreaChart data={filteredForecast} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="forecastGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="hsl(217 91% 60%)" stopOpacity={0.15} />
@@ -151,6 +181,23 @@ const DemandView = ({
                 tickLine={false}
               />
               <Tooltip content={<CustomTooltip />} />
+
+              {/* Today boundary line */}
+              {todayDate && (
+                <ReferenceLine
+                  x={todayDate}
+                  stroke="hsl(220 10% 50%)"
+                  strokeWidth={1.5}
+                  strokeDasharray="4 4"
+                  label={{
+                    value: "TODAY",
+                    position: "top",
+                    fill: "hsl(220 10% 50%)",
+                    fontSize: 9,
+                    fontWeight: 600,
+                  }}
+                />
+              )}
               
               {/* Confidence band */}
               {showConfidence && (

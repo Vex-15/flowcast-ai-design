@@ -4,12 +4,12 @@ import {
 } from "recharts";
 import type { ForecastPoint } from "@/data/types";
 
-const DemandForecast = ({ data, skuName }: { data: ForecastPoint[]; skuName: string }) => {
+const DemandForecast = ({ data, skuName, horizonDays = 7 }: { data: ForecastPoint[]; skuName: string; horizonDays?: number }) => {
   return (
     <div className="glass rounded-2xl p-5">
       <div className="flex items-center justify-between mb-5">
         <div>
-          <h3 className="text-sm font-semibold text-foreground">7-Day Demand Forecast</h3>
+          <h3 className="text-sm font-semibold text-foreground">{horizonDays}-Day Demand Forecast</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             {skuName} — predicted vs actual with confidence band
           </p>
