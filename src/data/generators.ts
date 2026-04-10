@@ -10,6 +10,7 @@ import type {
   MigrationEdge, MigrationNode, DemandMigrationGraph,
 } from "./types";
 import { getSKU, getStore, skuCatalog, stores } from "./brands";
+import { SimpleLinearRegression } from 'ml-regression-simple-linear';
 
 // ─── Seeded random ────────────────────────────────────────
 function seeded(seed: number) {
@@ -48,28 +49,62 @@ function clamp(val: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, val));
 }
 
-// ─── Demand Forecast ──────────────────────────────────────
 export function generateDemandForecast(skuId: string, days = 14): ForecastPoint[] {
-  const rng = seeded(hashStr(skuId + "forecast"));
+  const rng = seeded(hashStr(skuId + "forecast_ml"));
   const sku = getSKU(skuId);
   const basePrice = sku.price;
   const baseDemand = Math.max(8, Math.round(200 - basePrice * 0.08 + rng() * 30));
-  const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  
+  // 1. Generate Historical Training Data (Past 60 days)
+  const trainingX: number[] = [];
+  const trainingY: number[] = [];
+  
+  // Provide a base trend (either positive or negative)
+  const globalTrend = (rng() - 0.4) * 0.8; // e.g., -0.32 to +0.48
+  
+  for (let i = -60; i <= 0; i++) {
+    trainingX.push(i);
+    const dayOfWeek = ((i % 7) + 7) % 7;
+    const weekendBoost = (dayOfWeek >= 5) ? 1.35 : 1.0;
+    const seasonality = Math.sin(i / 7) * 0.1 + 1; // Slight undulating seasonality
+    const noise = 0.85 + rng() * 0.3;
+    
+    // Y = (Base + trend*t) * multipliers
+    const yVal = Math.max(2, Math.round((baseDemand + globalTrend * i) * weekendBoost * seasonality * noise));
+    trainingY.push(yVal);
+  }
 
+  // 2. Train Real ML Model (Simple Linear Regression)
+  const regressionModel = new SimpleLinearRegression(trainingX, trainingY);
+
+  const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  
   return Array.from({ length: days }, (_, i) => {
-    const dayName = dayNames[i % 7];
-    const weekendBoost = (i % 7 >= 5) ? 1.3 : 1.0;
-    const trend = 1 + (i * 0.01);
-    const noise = 0.9 + rng() * 0.2;
-    const predicted = Math.round(baseDemand * weekendBoost * trend * noise);
+    const dayOffset = i + 1; // Future days 1 to 14
+    const dayName = dayNames[(dayOffset + 1) % 7]; // Offset to match Mon-Sun sequence properly
+    
+    // 3. Inference / Prediction leveraging the ML model
+    const mlBasePrediction = regressionModel.predict(dayOffset);
+    
+    // Reapply structural weekend boost since simple linear regression misses cyclical seasonality
+    const dayOfWeek = ((dayOffset % 7) + 7) % 7;
+    const weekendBoost = (dayOfWeek >= 5) ? 1.35 : 1.0;
+    
+    // The final prediction blends the ML trend with structural knowledge
+    const predicted = Math.max(2, Math.round(mlBasePrediction * weekendBoost));
+    
     const upper = Math.round(predicted * (1.1 + rng() * 0.08));
     const lower = Math.round(predicted * (0.85 + rng() * 0.05));
+    
+    // For the UI, we'll keep the first few days of "future" empty of actuals, 
+    // but the ones before "today" have actuals
     const actual = i < days - 3
       ? Math.round(predicted * (0.88 + rng() * 0.24))
       : undefined;
 
     const month = 4; // April
     const dayNum = 10 + i;
+    
     return {
       day: dayName,
       date: `Apr ${dayNum}`,
@@ -77,6 +112,11 @@ export function generateDemandForecast(skuId: string, days = 14): ForecastPoint[
       predicted,
       lower,
       upper,
+      // Pass ML metadata back if needed by UI
+      mlData: {
+        r2: regressionModel.score(trainingX, trainingY).r2,
+        equation: regressionModel.toString(2)
+      }
     };
   });
 }

@@ -33,6 +33,10 @@ export interface ForecastPoint {
   predicted: number;
   lower: number;        // confidence band
   upper: number;
+  mlData?: {
+    r2: number;
+    equation: string;
+  };
 }
 
 export interface DemandDecomposition {

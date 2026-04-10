@@ -105,11 +105,46 @@ function buildScenario(
   sliderHours: number,
   baseIntent: IntentAccelerationResult
 ): ScenarioConfig {
+  const baseSaves = baseIntent.signals[0]?.current || 320;
+  const baseViews = baseIntent.signals[1]?.current || 4200;
+  const baseDwell = baseIntent.signals[2]?.current || 28;
+  const baseCart = Math.round(baseViews * 0.05);
+
+  let m = 1.0;
+  if (scenario === "incoming") m = 1.2 + (1 - sliderHours / 72) * 1.5;
+  if (scenario === "critical") m = 3.5;
+
+  const views = Math.round(baseViews * m * (1 + (m * 0.02)));
+  const saves = Math.round(baseSaves * m * (1 + (m * 0.05)));
+  const dwell = Math.round(baseDwell * (1 + (m - 1) * 0.3));
+  const cart = Math.round(baseCart * Math.pow(m, 1.4)); 
+
+  const formatUnit = (val: number) => val >= 1000 ? (val / 1000).toFixed(1) + "k" : val.toLocaleString();
+  
+  const fViews = formatUnit(views);
+  const fSaves = formatUnit(saves);
+  const fCart = formatUnit(cart);
+  const fDwell = dwell >= 60 ? `${Math.floor(dwell / 60)}m ${dwell % 60}s` : `${dwell}s`;
+
+  const safeChangePercent = (current: number, previous: number, fallbackBase: number) => 
+    previous > 0 ? Math.round(((current - previous) / previous) * 100) + fallbackBase : 0;
+
+  const cViews = safeChangePercent(views, baseViews, Math.max(2, Math.abs(baseIntent.signals[1]?.changePercent || 0)));
+  const cSaves = safeChangePercent(saves, baseSaves, Math.max(3, Math.abs(baseIntent.signals[0]?.changePercent || 0)));
+  const cDwell = safeChangePercent(dwell, baseDwell, Math.max(1, Math.abs(baseIntent.signals[2]?.changePercent || 0)));
+  const cCart = safeChangePercent(cart, baseCart, 5);
+
+  const dynamicSignals = [
+    { label: "Page views", value: fViews, change: `+${cViews}%`, changeColor: scenario === "dormant" ? "text-muted-foreground" : "text-emerald-400" },
+    { label: "Product saves", value: fSaves, change: `+${cSaves}%`, changeColor: scenario === "dormant" ? "text-muted-foreground" : "text-emerald-400" },
+    { label: "Avg dwell", value: fDwell, change: `+${cDwell}%`, changeColor: scenario === "dormant" ? "text-muted-foreground" : "text-emerald-400" },
+    { label: "Add-to-cart", value: fCart, change: `+${cCart}%`, changeColor: scenario === "dormant" ? "text-muted-foreground" : "text-emerald-400" },
+  ];
+
   switch (scenario) {
     case "incoming": {
-      // Amber arc — hours controlled by slider
       const h = sliderHours;
-      const conf = Math.round(55 + (1 - h / 72) * 25); // 55–80%
+      const conf = Math.round(55 + (1 - h / 72) * 25); 
       return {
         label: "Spike incoming",
         hoursToSpike: h,
@@ -121,17 +156,10 @@ function buildScenario(
           h <= 16
             ? `Pre-position ${Math.round(120 + (72 - h) * 3)} units and notify regional warehouse. Lead time is tight.`
             : `Monitor closely. Consider pre-ordering ${Math.round(80 + (72 - h) * 2)} units within the next ${Math.round(h / 2)}h window.`,
-        signals: [
-          { label: "Page views", value: `${(12.4 + (72 - h) * 0.22).toFixed(1)}k`, change: `+${Math.round(24 + (72 - h) * 1)}%`, changeColor: "text-emerald-400" },
-          { label: "Product saves", value: `${(0.8 + (72 - h) * 0.02).toFixed(1)}k`, change: `+${Math.round(18 + (72 - h) * 2.3)}%`, changeColor: "text-emerald-400" },
-          { label: "Avg dwell", value: `${Math.floor(2 + (72 - h) * 0.03)}m ${Math.round(12 + (72 - h) * 0.4)}s`, change: `+${Math.round(9 + (72 - h) * 0.44)}%`, changeColor: "text-emerald-400" },
-          { label: "Add-to-cart", value: `${(0.3 + (72 - h) * 0.012).toFixed(1)}k`, change: `+${Math.round(35 + (72 - h) * 2.5)}%`, changeColor: "text-emerald-400" },
-        ],
+        signals: dynamicSignals,
       };
     }
-
     case "critical": {
-      // Red arc — imminent
       return {
         label: "Critical — imminent",
         hoursToSpike: 8,
@@ -141,32 +169,21 @@ function buildScenario(
         statusDot: "bg-red-500 animate-pulse",
         suggestedAction:
           "Emergency reorder triggered. Alert warehouse and expedite shipping from 2 DCs.",
-        signals: [
-          { label: "Page views", value: "28.1k", change: "+94%", changeColor: "text-emerald-400" },
-          { label: "Product saves", value: "2.3k", change: "+187%", changeColor: "text-emerald-400" },
-          { label: "Avg dwell", value: "4m 38s", change: "+41%", changeColor: "text-emerald-400" },
-          { label: "Add-to-cart", value: "1.1k", change: "+212%", changeColor: "text-emerald-400" },
-        ],
+        signals: dynamicSignals,
       };
     }
-
     case "dormant":
     default: {
       return {
         label: "No spike detected",
         hoursToSpike: 72,
-        confidence: Math.round(baseIntent.confidence * 100 * 0.3), // low
+        confidence: Math.round(baseIntent.confidence * 100 * 0.3), 
         arcColor: "hsl(var(--border))",
         statusLabel: "Monitoring",
         statusDot: "bg-muted-foreground/30",
         suggestedAction:
           "No action required. Intent signals are within normal range. Continue automated monitoring.",
-        signals: [
-          { label: "Page views", value: `${(baseIntent.signals[1]?.current || 4200).toLocaleString()}`, change: `+${Math.abs(baseIntent.signals[1]?.changePercent ?? 3).toFixed(0)}%`, changeColor: "text-muted-foreground" },
-          { label: "Product saves", value: `${(baseIntent.signals[0]?.current || 320).toLocaleString()}`, change: `+${Math.abs(baseIntent.signals[0]?.changePercent ?? 2).toFixed(0)}%`, changeColor: "text-muted-foreground" },
-          { label: "Avg dwell", value: `${Math.round(baseIntent.signals[2]?.current || 28)}s`, change: `+${Math.abs(baseIntent.signals[2]?.changePercent ?? 1).toFixed(0)}%`, changeColor: "text-muted-foreground" },
-          { label: "Add-to-cart", value: "89", change: "+2%", changeColor: "text-muted-foreground" },
-        ],
+        signals: dynamicSignals,
       };
     }
   }

@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import {
-  AreaChart, Area, Line, XAxis, YAxis,
+  ComposedChart, Area, Line, XAxis, YAxis,
   Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid,
 } from "recharts";
 import type { ForecastPoint, DemandDecomposition } from "@/data/types";
@@ -54,7 +54,9 @@ const DemandView = ({
             <div key={i} className="flex items-center justify-between gap-4">
               <span className="text-[10px] text-muted-foreground">{labels[entry.dataKey] || entry.dataKey}</span>
               <span className={`text-[11px] font-mono-data font-semibold ${colors[entry.dataKey] || "text-foreground"}`}>
-                {Math.round(entry.value)}
+                {Array.isArray(entry.value) 
+                  ? `${Math.round(entry.value[0])} - ${Math.round(entry.value[1])}`
+                  : Math.round(entry.value)}
               </span>
             </div>
           );
@@ -142,12 +144,14 @@ const DemandView = ({
           </span>
         </div>
       </div>
+      
+
 
       {/* ─── Full-bleed forecast chart ─── */}
       <div className="relative -mx-6">
         <div className="h-[320px] w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart 
+            <ComposedChart 
               data={filteredForecast.map((d) => ({
                 ...d,
                 confidence: [d.lower, d.upper],
@@ -214,33 +218,11 @@ const DemandView = ({
                   name="Forecast"
                 />
               )}
-            </AreaChart>
+            </ComposedChart>
           </ResponsiveContainer>
-        </div>
-        {/* Updated chart legend */}
-        <div className="absolute top-4 left-8 flex items-center gap-5">
-          {showActual && (
-            <div className="flex items-center gap-1.5">
-              <div className="w-5 h-[2.5px] bg-primary rounded-full" />
-              <span className="text-[10px] text-muted-foreground">Actual</span>
-            </div>
-          )}
-          {showPredicted && (
-            <div className="flex items-center gap-1.5">
-              <div className="w-5 h-[3px] rounded-full" style={{ background: "hsl(280 80% 75%)" }} />
-              <span className="text-[10px] text-muted-foreground">Forecast</span>
-            </div>
-          )}
-          {showConfidence && (
-            <div className="flex items-center gap-1.5">
-              <div className="w-5 h-3 rounded-sm bg-purple-500/10 border border-purple-500/20" />
-              <span className="text-[10px] text-muted-foreground">95% CI</span>
-            </div>
-          )}
         </div>
       </div>
 
-      {/* ─── Decomposition: Waterfall-style pills ─── */}
       <div>
         <h2 className="text-sm font-semibold text-foreground mb-4">Demand Decomposition</h2>
         <div className="flex items-center gap-3 flex-wrap">
