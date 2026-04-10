@@ -710,33 +710,17 @@ export function generateDynamicNotifications(): DynamicNotification[] {
         actionSuggestion: `Increase reorder by ${Math.round(deviation * 20)}% and alert warehouse team`,
         icon: "TrendingUp",
         relatedView: "sku-deep-dive",
-        relatedTab: "demand",
+        relatedTab: "predictive-demand",
       });
     }
 
-    // Rule 2: Return anomaly (return rate > category avg by 50%+)
+    // Rule 2: Return anomaly (REMOVED for "Supply Chain Sees Future" pitch)
+    /*
     if (returnData.returnRate > returnData.categoryAvgReturn * 1.5 && skuRng() > 0.4) {
       const severity = returnData.riskScore > 60 ? "critical" : returnData.riskScore > 40 ? "high" : "medium";
-      notifications.push({
-        id: `notif-return-${sku.id}`,
-        type: "return_anomaly",
-        priority: severity,
-        title: "Return Rate Anomaly",
-        message: `${sku.name} return rate (${(returnData.returnRate * 100).toFixed(1)}%) is ${Math.round((returnData.returnRate / returnData.categoryAvgReturn - 1) * 100)}% above ${sku.category} average. Top reason: ${returnData.reasons[0]?.reason || "Unknown"}.`,
-        skuId: sku.id,
-        skuName: sku.name,
-        brand: sku.brand,
-        triggerCondition: `return_rate > category_avg * 1.50`,
-        triggerValue: parseFloat((returnData.returnRate * 100).toFixed(1)),
-        threshold: parseFloat((returnData.categoryAvgReturn * 1.5 * 100).toFixed(1)),
-        timestamp: `${Math.round(5 + skuRng() * 30)}m ago`,
-        isRead: skuRng() > 0.6,
-        actionSuggestion: returnData.suggestedFixes[0] || "Review product listing and customer feedback",
-        icon: "Undo2",
-        relatedView: "sku-deep-dive",
-        relatedTab: "returns",
-      });
+      ...
     }
+    */
 
     // Rule 3: Stockout warning
     if (inventory.daysUntilStockout < 5 && skuRng() > 0.3) {
@@ -757,7 +741,7 @@ export function generateDynamicNotifications(): DynamicNotification[] {
         actionSuggestion: `Emergency reorder ${inventory.reorderQty} units immediately`,
         icon: "AlertTriangle",
         relatedView: "sku-deep-dive",
-        relatedTab: "inventory",
+        relatedTab: "orchestration",
       });
     }
 
@@ -780,7 +764,7 @@ export function generateDynamicNotifications(): DynamicNotification[] {
         actionSuggestion: "Consider markdown strategy or cross-store transfer",
         icon: "Package",
         relatedView: "sku-deep-dive",
-        relatedTab: "inventory",
+        relatedTab: "orchestration",
       });
     }
 
@@ -803,7 +787,7 @@ export function generateDynamicNotifications(): DynamicNotification[] {
         actionSuggestion: "Pre-position stock and prepare for demand surge",
         icon: "Zap",
         relatedView: "sku-deep-dive",
-        relatedTab: "signals",
+        relatedTab: "predictive-demand",
       });
     }
   });

@@ -345,10 +345,7 @@ export type DashboardView =
 
 export type SKUTab =
   | "overview"
-  | "demand"
-  | "signals"
-  | "returns"
-  | "inventory"
-  | "simulation"
-  | "explainability";
+  | "predictive-demand"
+  | "orchestration";
+
 
