@@ -1,13 +1,15 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import type { RetailBrainState } from "@/hooks/useRetailBrain";
 import { getSKU, getBrand } from "@/data/brands";
 import {
   ComposedChart, Area, Line, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer,
+  LineChart,
 } from "recharts";
 import {
   TrendingDown, TrendingUp, DollarSign, Target, Zap,
   ArrowDownRight, ArrowUpRight, Shield, AlertTriangle, BarChart3,
+  Calculator, ToggleLeft, ToggleRight, Info, Eye,
 } from "lucide-react";
 
 // ─── Animated Counter ──────────────────────────────────────
@@ -85,41 +87,125 @@ const SeasonalGauge = ({ value, label }: { value: number; label: string }) => {
   );
 };
 
-// ─── Custom Tooltip ────────────────────────────────────────
+// ─── Enhanced Tooltip ────────────────────────────────────────
 const ElasticityTooltip = ({ active, payload }: any) => {
   if (!active || !payload || payload.length === 0) return null;
   const data = payload[0].payload;
-  const isOptimal = data.priceMultiplier < 1.0;
+  const isOptimal = data.isOptimal;
+  const isCurrent = data.isCurrent;
   return (
-    <div className="bg-card/95 backdrop-blur-xl border border-border/40 rounded-xl px-4 py-3 shadow-2xl">
+    <div className="bg-card/95 backdrop-blur-xl border border-border/40 rounded-xl px-4 py-3 shadow-2xl min-w-[200px]">
       <div className="flex items-center gap-2 mb-2">
-        <span className={`w-1.5 h-1.5 rounded-full ${isOptimal ? "bg-emerald-400" : "bg-amber-400"}`} />
+        <span className={`w-2 h-2 rounded-full ${isOptimal ? "bg-emerald-400" : isCurrent ? "bg-amber-400" : "bg-primary"}`} />
         <p className="text-xs font-semibold text-foreground">${data.price.toFixed(2)}</p>
-        <span className="text-[9px] text-muted-foreground/50 font-mono-data">{(data.priceMultiplier * 100).toFixed(0)}%</span>
+        <span className="text-[9px] text-muted-foreground/50 font-mono-data ml-auto">{(data.priceMultiplier * 100).toFixed(0)}% of current</span>
       </div>
       <div className="space-y-1.5 text-[11px]">
         <div className="flex items-center justify-between gap-6">
           <span className="text-muted-foreground">Predicted Units</span>
-          <span className="font-mono-data text-primary font-medium">{data.predictedUnits}</span>
+          <span className="font-mono-data text-primary font-medium">{data.predictedUnits.toLocaleString()}</span>
         </div>
         <div className="flex items-center justify-between gap-6">
           <span className="text-muted-foreground">Revenue</span>
           <span className="font-mono-data text-emerald-400 font-medium">${data.predictedRevenue.toLocaleString()}</span>
         </div>
         <div className="flex items-center justify-between gap-6">
-          <span className="text-muted-foreground">CI Range</span>
-          <span className="font-mono-data text-muted-foreground/70">{data.confidenceLower} – {data.confidenceUpper}</span>
+          <span className="text-muted-foreground">Confidence Range</span>
+          <span className="font-mono-data text-muted-foreground/70">{data.confidenceLower} – {data.confidenceUpper} units</span>
+        </div>
+        {data.revenueDelta !== undefined && (
+          <div className="flex items-center justify-between gap-6 pt-1 border-t border-border/30">
+            <span className="text-muted-foreground">Δ Revenue</span>
+            <span className={`font-mono-data font-medium ${data.revenueDelta > 0 ? "text-emerald-400" : data.revenueDelta < 0 ? "text-destructive" : "text-muted-foreground"}`}>
+              {data.revenueDelta > 0 ? "+" : ""}{data.revenueDelta > 999 || data.revenueDelta < -999 ? `$${(data.revenueDelta / 1000).toFixed(1)}k` : `$${Math.round(data.revenueDelta)}`}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ─── Competitor Timeline Tooltip ─────────────────────────────
+const CompetitorTooltip = ({ active, payload }: any) => {
+  if (!active || !payload || payload.length === 0) return null;
+  const data = payload[0].payload;
+  return (
+    <div className="bg-card/95 backdrop-blur-xl border border-border/40 rounded-xl px-4 py-3 shadow-2xl min-w-[180px]">
+      <p className="text-xs font-semibold text-foreground mb-2">{data.day}</p>
+      <div className="space-y-1.5 text-[11px]">
+        <div className="flex items-center justify-between gap-6">
+          <span className="flex items-center gap-1.5"><span className="w-2 h-0.5 bg-primary rounded-full inline-block" /> Your Price</span>
+          <span className="font-mono-data text-primary font-medium">${data.yourPrice.toFixed(2)}</span>
+        </div>
+        <div className="flex items-center justify-between gap-6">
+          <span className="flex items-center gap-1.5"><span className="w-2 h-0.5 bg-amber-400 rounded-full inline-block" /> Competitor</span>
+          <span className="font-mono-data text-amber-400 font-medium">${data.competitorPrice.toFixed(2)}</span>
+        </div>
+        {data.isUndercut && (
+          <div className="flex items-center gap-1 pt-1 border-t border-border/30 text-destructive">
+            <AlertTriangle className="w-3 h-3" />
+            <span className="text-[10px]">Undercut by {Math.abs(data.undercutPct).toFixed(1)}%</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ─── Revenue Impact Bar Tooltip ──────────────────────────────
+const RevenueBarTooltip = ({ data, currentRevenue }: { data: any; currentRevenue: number }) => {
+  if (!data) return null;
+  const delta = data.predictedRevenue - currentRevenue;
+  const pctDiff = currentRevenue > 0 ? ((delta / currentRevenue) * 100) : 0;
+  return (
+    <div className="bg-card/95 backdrop-blur-xl border border-border/40 rounded-xl px-3 py-2 shadow-2xl text-[10px] min-w-[160px]">
+      <p className="font-semibold text-foreground mb-1">${data.price.toFixed(2)} <span className="text-muted-foreground/50 font-normal">({(data.priceMultiplier * 100).toFixed(0)}%)</span></p>
+      <div className="space-y-1">
+        <div className="flex justify-between gap-4">
+          <span className="text-muted-foreground">Revenue</span>
+          <span className="font-mono-data">${data.predictedRevenue.toLocaleString()}</span>
+        </div>
+        <div className="flex justify-between gap-4">
+          <span className="text-muted-foreground">Δ vs Current</span>
+          <span className={`font-mono-data ${delta >= 0 ? "text-emerald-400" : "text-destructive"}`}>
+            {delta >= 0 ? "+" : ""}{delta > 999 || delta < -999 ? `$${(delta / 1000).toFixed(1)}k` : `$${Math.round(delta)}`}
+          </span>
+        </div>
+        <div className="flex justify-between gap-4">
+          <span className="text-muted-foreground">% Difference</span>
+          <span className={`font-mono-data font-semibold ${pctDiff >= 0 ? "text-emerald-400" : "text-destructive"}`}>
+            {pctDiff >= 0 ? "+" : ""}{pctDiff.toFixed(1)}%
+          </span>
         </div>
       </div>
     </div>
   );
 };
 
+// ─── Microcopy helper ────────────────────────────────────────
+const Microcopy = ({ text }: { text: string }) => (
+  <div className="flex items-start gap-1.5 mt-1">
+    <Info className="w-3 h-3 text-muted-foreground/40 shrink-0 mt-0.5" />
+    <p className="text-[10px] text-muted-foreground/50 leading-relaxed">{text}</p>
+  </div>
+);
+
 // ─── Main View Component ────────────────────────────────────
 const PriceElasticityView = ({ brain }: { brain: RetailBrainState }) => {
   const sku = getSKU(brain.selectedSKU);
   const brand = getBrand(sku.brand);
   const elasticity = brain.elasticity;
+
+  // ─── State: Optimization mode toggle ───
+  const [optimizationMode, setOptimizationMode] = useState<"revenue" | "profit">("revenue");
+  const [costPerUnit, setCostPerUnit] = useState(() => Math.round(sku.price * 0.4)); // default 40% of retail
+  const [hoveredBarIdx, setHoveredBarIdx] = useState<number | null>(null);
+
+  // Update cost when SKU changes
+  useEffect(() => {
+    setCostPerUnit(Math.round(sku.price * 0.4));
+  }, [sku.price]);
 
   const labelColor: Record<string, string> = {
     "Highly Elastic": "text-destructive",
@@ -144,6 +230,12 @@ const PriceElasticityView = ({ brain }: { brain: RetailBrainState }) => {
   const currentPricePct = ((sku.price - rangeMin) / rangeSpan) * 100;
   const optimumPricePct = ((elasticity.revenueMaxPrice - rangeMin) / rangeSpan) * 100;
 
+  // Discount range — ensure ASCENDING order (low% to high%)
+  const discountLow = ((1 - elasticity.markdownSweetSpot.high / sku.price) * 100);
+  const discountHigh = ((1 - elasticity.markdownSweetSpot.low / sku.price) * 100);
+  const discountMin = Math.min(discountLow, discountHigh);
+  const discountMax = Math.max(discountLow, discountHigh);
+
   // Competitor delta
   const competitorDelta = ((elasticity.competitorAnchor - sku.price) / sku.price * 100);
 
@@ -152,6 +244,27 @@ const PriceElasticityView = ({ brain }: { brain: RetailBrainState }) => {
   const revenueUplift = currentRevenue > 0
     ? ((elasticity.revenueMaxRevenue - currentRevenue) / currentRevenue * 100)
     : 0;
+
+  // ─── Profit optimization calculations ───
+  const profitData = useMemo(() => {
+    const curveWithProfit = elasticity.curve.map(pt => ({
+      ...pt,
+      profit: (pt.price - costPerUnit) * pt.predictedUnits,
+    }));
+    const profitMaxPoint = curveWithProfit.reduce((best, pt) =>
+      pt.profit > best.profit ? pt : best
+    , curveWithProfit[0]);
+    const currentPoint = curveWithProfit.find(p => p.priceMultiplier === 1.0);
+    const currentProfit = currentPoint ? currentPoint.profit : 0;
+    return {
+      curveWithProfit,
+      profitMaxPrice: profitMaxPoint.price,
+      profitMaxValue: profitMaxPoint.profit,
+      profitMaxUnits: profitMaxPoint.predictedUnits,
+      currentProfit,
+      profitUplift: currentProfit > 0 ? ((profitMaxPoint.profit - currentProfit) / currentProfit * 100) : 0,
+    };
+  }, [elasticity.curve, costPerUnit]);
 
   // Pricing strategy recommendation
   const strategy = useMemo(() => {
@@ -194,9 +307,38 @@ const PriceElasticityView = ({ brain }: { brain: RetailBrainState }) => {
   const curveData = elasticity.curve.map(pt => ({
     ...pt,
     revenueDelta: pt.predictedRevenue - currentRevenue,
+    profit: (pt.price - costPerUnit) * pt.predictedUnits,
     isOptimal: pt.price === elasticity.revenueMaxPrice,
     isCurrent: pt.priceMultiplier === 1.0,
+    isProfitOptimal: pt.price === profitData.profitMaxPrice,
   }));
+
+  // Competitor timeline analytics
+  const competitorInsight = useMemo(() => {
+    const timeline = elasticity.competitorTimeline;
+    if (!timeline || timeline.length === 0) return null;
+    const firstPrice = timeline[0].competitorPrice;
+    const lastPrice = timeline[timeline.length - 1].competitorPrice;
+    const priceDrop = ((firstPrice - lastPrice) / firstPrice) * 100;
+    const undercutDays = timeline.filter(d => d.isUndercut).length;
+    return {
+      priceDrop: parseFloat(priceDrop.toFixed(1)),
+      direction: priceDrop > 0 ? "dropped" : "increased",
+      undercutDays,
+      totalDays: timeline.length,
+    };
+  }, [elasticity.competitorTimeline]);
+
+  // Best performing revenue range
+  const bestRange = useMemo(() => {
+    const sorted = [...curveData].sort((a, b) => b.predictedRevenue - a.predictedRevenue);
+    const top3 = sorted.slice(0, 3).sort((a, b) => a.price - b.price);
+    return { low: top3[0]?.price || 0, high: top3[top3.length - 1]?.price || 0 };
+  }, [curveData]);
+
+  // Format helpers
+  const fmtCurrency = (v: number) => `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const fmtPct = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
 
   return (
     <div className="space-y-6 animate-slide-up">
@@ -254,127 +396,228 @@ const PriceElasticityView = ({ brain }: { brain: RetailBrainState }) => {
         </div>
       </div>
 
-      {/* ─── KPI Strip — 5 tiles with icons ─── */}
-      <div className="grid grid-cols-5 gap-px bg-border/20 rounded-2xl overflow-hidden">
-        {[
-          {
-            label: "CURRENT PRICE", value: `$${sku.price.toLocaleString()}`,
-            icon: DollarSign, color: "text-foreground", subtext: sku.category,
-          },
-          {
-            label: "REVENUE-MAX PRICE", value: `$${elasticity.revenueMaxPrice.toFixed(2)}`,
-            icon: Target,
-            color: elasticity.revenueMaxPrice < sku.price ? "text-emerald-400" : "text-amber-400",
-            subtext: `${elasticity.revenueMaxPrice < sku.price ? "↓" : "↑"} ${Math.abs((1 - elasticity.revenueMaxPrice / sku.price) * 100).toFixed(1)}% ${elasticity.revenueMaxPrice < sku.price ? "discount" : "premium"}`,
-          },
-          {
-            label: "REVENUE UPLIFT", value: `+${revenueUplift.toFixed(1)}%`,
-            icon: TrendingUp, color: revenueUplift > 0 ? "text-emerald-400" : "text-muted-foreground",
-            subtext: `$${elasticity.revenueMaxRevenue.toLocaleString()} at optimum`,
-          },
-          {
-            label: "COMPETITOR PRICE", value: `$${elasticity.competitorAnchor.toFixed(2)}`,
-            icon: BarChart3,
-            color: competitorDelta < 0 ? "text-amber-400" : "text-emerald-400",
-            subtext: `${competitorDelta > 0 ? "+" : ""}${competitorDelta.toFixed(1)}% vs you`,
-          },
-          {
-            label: "OPTIMAL UNITS", value: `${elasticity.revenueMaxUnits}`,
-            icon: Zap, color: "text-primary",
-            subtext: `at $${elasticity.revenueMaxPrice.toFixed(2)}`,
-          },
-        ].map((tile) => (
-          <div key={tile.label} className="bg-card p-4 group hover:bg-secondary/20 transition-colors">
-            <div className="flex items-center justify-between mb-2">
-              <p className="label-micro text-[8px]">{tile.label}</p>
-              <tile.icon className="w-3.5 h-3.5 text-muted-foreground/30" />
-            </div>
-            <p className={`text-2xl font-light font-mono-data tracking-tight ${tile.color}`}>
-              {tile.value}
-            </p>
-            <p className="text-[10px] text-muted-foreground/50 mt-1 font-mono-data">{tile.subtext}</p>
+      {/* ─── Optimization Mode Toggle + KPI Strip ─── */}
+      <div className="space-y-4">
+        {/* Toggle */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setOptimizationMode(optimizationMode === "revenue" ? "profit" : "revenue")}
+              className="group flex items-center gap-2 px-4 py-2 rounded-xl bg-card border border-border/60 hover:border-primary/30 transition-all duration-300"
+            >
+              {optimizationMode === "revenue" ? (
+                <ToggleLeft className="w-5 h-5 text-primary" />
+              ) : (
+                <ToggleRight className="w-5 h-5 text-emerald-400" />
+              )}
+              <span className="text-xs font-semibold text-foreground">
+                {optimizationMode === "revenue" ? "Revenue Optimization" : "Profit Optimization"}
+              </span>
+            </button>
+            <Microcopy text={optimizationMode === "revenue"
+              ? "Maximizing total revenue (price × units sold)"
+              : "Maximizing profit after cost deduction ((price − cost) × units sold)"
+            } />
           </div>
-        ))}
+          {optimizationMode === "profit" && (
+            <div className="flex items-center gap-2 animate-slide-up">
+              <label className="text-[10px] text-muted-foreground font-medium">Cost per Unit:</label>
+              <div className="relative">
+                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">$</span>
+                <input
+                  type="number"
+                  value={costPerUnit}
+                  onChange={e => setCostPerUnit(Math.max(0, Number(e.target.value)))}
+                  className="w-24 pl-6 pr-2 py-1.5 text-xs font-mono-data bg-secondary/30 border border-border/40 rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/30 text-foreground"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* KPI Strip */}
+        <div className={`grid ${optimizationMode === "profit" ? "grid-cols-6" : "grid-cols-5"} gap-px bg-border/20 rounded-2xl overflow-hidden`}>
+          {[
+            {
+              label: "CURRENT PRICE", value: fmtCurrency(sku.price),
+              icon: DollarSign, color: "text-foreground", subtext: sku.category,
+              hint: "The current retail price for this SKU",
+            },
+            {
+              label: optimizationMode === "revenue" ? "REVENUE-MAX PRICE" : "PROFIT-MAX PRICE",
+              value: fmtCurrency(optimizationMode === "revenue" ? elasticity.revenueMaxPrice : profitData.profitMaxPrice),
+              icon: Target,
+              color: (optimizationMode === "revenue" ? elasticity.revenueMaxPrice : profitData.profitMaxPrice) < sku.price ? "text-emerald-400" : "text-amber-400",
+              subtext: `${(optimizationMode === "revenue" ? elasticity.revenueMaxPrice : profitData.profitMaxPrice) < sku.price ? "↓" : "↑"} ${Math.abs((1 - (optimizationMode === "revenue" ? elasticity.revenueMaxPrice : profitData.profitMaxPrice) / sku.price) * 100).toFixed(1)}% ${(optimizationMode === "revenue" ? elasticity.revenueMaxPrice : profitData.profitMaxPrice) < sku.price ? "discount" : "premium"}`,
+              hint: optimizationMode === "revenue" ? "Price that generates maximum total revenue" : "Price that generates maximum profit after costs",
+            },
+            {
+              label: optimizationMode === "revenue" ? "REVENUE UPLIFT" : "PROFIT UPLIFT",
+              value: fmtPct(optimizationMode === "revenue" ? revenueUplift : profitData.profitUplift),
+              icon: TrendingUp,
+              color: (optimizationMode === "revenue" ? revenueUplift : profitData.profitUplift) > 0 ? "text-emerald-400" : "text-muted-foreground",
+              subtext: optimizationMode === "revenue"
+                ? `$${elasticity.revenueMaxRevenue.toLocaleString()} at optimum`
+                : `$${Math.round(profitData.profitMaxValue).toLocaleString()} max profit`,
+              hint: `Potential ${optimizationMode} increase by moving to the optimal price`,
+            },
+            {
+              label: "COMPETITOR PRICE", value: fmtCurrency(elasticity.competitorAnchor),
+              icon: BarChart3,
+              color: competitorDelta < 0 ? "text-amber-400" : "text-emerald-400",
+              subtext: `${competitorDelta > 0 ? "+" : ""}${competitorDelta.toFixed(1)}% vs you`,
+              hint: "Average competitor price for this category/SKU",
+            },
+            {
+              label: "OPTIMAL UNITS",
+              value: `${optimizationMode === "revenue" ? elasticity.revenueMaxUnits : profitData.profitMaxUnits}`,
+              icon: Zap, color: "text-primary",
+              subtext: `at ${fmtCurrency(optimizationMode === "revenue" ? elasticity.revenueMaxPrice : profitData.profitMaxPrice)}`,
+              hint: "Predicted units sold at the optimal price point",
+            },
+            ...(optimizationMode === "profit" ? [{
+              label: "MAX PROFIT",
+              value: `$${Math.round(profitData.profitMaxValue).toLocaleString()}`,
+              icon: Calculator, color: "text-emerald-400" as string,
+              subtext: `cost: ${fmtCurrency(costPerUnit)}/unit`,
+              hint: "Maximum achievable profit at the optimal price",
+            }] : []),
+          ].map((tile) => (
+            <div key={tile.label} className="bg-card p-4 group hover:bg-secondary/20 transition-all duration-300">
+              <div className="flex items-center justify-between mb-2">
+                <p className="label-micro text-[8px]">{tile.label}</p>
+                <tile.icon className="w-3.5 h-3.5 text-muted-foreground/30 group-hover:text-muted-foreground/50 transition-colors" />
+              </div>
+              <p className={`text-2xl font-light font-mono-data tracking-tight ${tile.color} transition-colors`}>
+                {tile.value}
+              </p>
+              <p className="text-[10px] text-muted-foreground/50 mt-1 font-mono-data">{tile.subtext}</p>
+              <p className="text-[9px] text-muted-foreground/30 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">{tile.hint}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Revenue vs Profit Comparison Card (visible in profit mode) */}
+        {optimizationMode === "profit" && (
+          <div className="grid grid-cols-2 gap-4 animate-slide-up">
+            <div className="rounded-xl p-4 bg-primary/[0.04] border border-primary/15">
+              <p className="label-micro text-[8px] mb-2">REVENUE-MAXIMIZING</p>
+              <div className="flex items-baseline gap-2">
+                <span className="text-lg font-light font-mono-data text-primary">{fmtCurrency(elasticity.revenueMaxPrice)}</span>
+                <span className="text-[10px] text-muted-foreground">→ Rev: ${elasticity.revenueMaxRevenue.toLocaleString()}</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground/50 mt-1">
+                Profit at this price: ${Math.round((elasticity.revenueMaxPrice - costPerUnit) * elasticity.revenueMaxUnits).toLocaleString()}
+              </p>
+            </div>
+            <div className="rounded-xl p-4 bg-emerald-500/[0.04] border border-emerald-500/15">
+              <p className="label-micro text-[8px] mb-2">PROFIT-MAXIMIZING</p>
+              <div className="flex items-baseline gap-2">
+                <span className="text-lg font-light font-mono-data text-emerald-400">{fmtCurrency(profitData.profitMaxPrice)}</span>
+                <span className="text-[10px] text-muted-foreground">→ Profit: ${Math.round(profitData.profitMaxValue).toLocaleString()}</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground/50 mt-1">
+                Revenue at this price: ${Math.round(profitData.curveWithProfit.find(p => p.price === profitData.profitMaxPrice)?.predictedRevenue || 0).toLocaleString()}
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* ─── Main Chart: Elasticity Curve ─── */}
+      {/* ─── Main Chart: Demand-Price Response Curve (FIXED) ─── */}
       <div className="p-6 rounded-2xl bg-card border border-border/60 surface-glow">
         <div className="flex items-center justify-between mb-5">
           <div>
             <p className="text-sm font-semibold text-foreground">Demand-Price Response Curve</p>
             <p className="text-[10px] text-muted-foreground/50 mt-0.5">13 price points from 70% to 130% of current · confidence intervals shown</p>
+            <Microcopy text="This chart shows how demand (units) and revenue change as price varies. The green dashed line marks the optimal price point." />
           </div>
           <div className="flex items-center gap-5 text-[10px] text-muted-foreground/60">
             <span className="flex items-center gap-1.5">
-              <span className="w-3 h-0.5 bg-primary rounded-full inline-block" /> Predicted Units
+              <span className="w-3 h-0.5 bg-primary rounded-full inline-block" /> Demand (Units)
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 bg-emerald-500/20 border border-emerald-500/30 rounded-sm inline-block" /> Revenue
+              <span className="w-3 h-3 bg-emerald-500/20 border border-emerald-500/30 rounded-sm inline-block" /> Revenue ($)
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 bg-purple-500/10 border border-purple-500/20 rounded-sm inline-block" /> 90% CI
+              <span className="w-3 h-3 bg-purple-500/8 border border-purple-500/15 rounded-sm inline-block" /> 90% CI
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-0 border-t border-dashed border-amber-400 inline-block" style={{ width: 12 }} /> Current
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-0 border-t border-dashed border-emerald-400 inline-block" style={{ width: 12 }} /> Optimal
             </span>
           </div>
         </div>
-        <div className="-mx-6" style={{ height: 340 }}>
+        <div style={{ height: 380 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={curveData} margin={{ top: 10, right: 30, left: 20, bottom: 5 }}>
+            <ComposedChart data={curveData} margin={{ top: 15, right: 40, left: 10, bottom: 25 }}>
               <defs>
                 <linearGradient id="confidenceGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="hsl(265 60% 62%)" stopOpacity={0.12} />
-                  <stop offset="100%" stopColor="hsl(265 60% 62%)" stopOpacity={0.02} />
+                  <stop offset="0%" stopColor="hsl(265 60% 62%)" stopOpacity={0.06} />
+                  <stop offset="100%" stopColor="hsl(265 60% 62%)" stopOpacity={0.01} />
                 </linearGradient>
                 <linearGradient id="revenueGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="hsl(152 69% 45%)" stopOpacity={0.25} />
-                  <stop offset="100%" stopColor="hsl(152 69% 45%)" stopOpacity={0.05} />
+                  <stop offset="0%" stopColor="hsl(152 69% 45%)" stopOpacity={0.2} />
+                  <stop offset="100%" stopColor="hsl(152 69% 45%)" stopOpacity={0.03} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.25} />
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.2} vertical={false} />
               <XAxis
                 dataKey="price"
                 tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }}
                 tickFormatter={(v: number) => `$${Math.round(v)}`}
                 axisLine={{ stroke: "hsl(var(--border))", strokeOpacity: 0.3 }}
+                label={{ value: "Price ($)", position: "bottom", offset: 8, style: { fill: "hsl(var(--muted-foreground))", fontSize: 11, fontWeight: 500 } }}
               />
               <YAxis yAxisId="units" orientation="left"
                 tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }}
                 axisLine={false} tickLine={false}
-                label={{ value: "Units", angle: -90, position: "insideLeft", style: { fill: "hsl(var(--muted-foreground))", fontSize: 9, opacity: 0.4 } }}
+                label={{ value: "Units Sold", angle: -90, position: "insideLeft", offset: -5, style: { fill: "hsl(var(--muted-foreground))", fontSize: 11, fontWeight: 500 } }}
               />
               <YAxis yAxisId="revenue" orientation="right"
                 tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }}
                 tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}k`}
                 axisLine={false} tickLine={false}
+                label={{ value: "Revenue ($)", angle: 90, position: "insideRight", offset: -5, style: { fill: "hsl(var(--muted-foreground))", fontSize: 11, fontWeight: 500 } }}
               />
               <Tooltip content={<ElasticityTooltip />} />
 
-              {/* Confidence band */}
+              {/* Confidence band — very subtle */}
               <Area yAxisId="units" dataKey="confidenceUpper" stroke="none" fill="url(#confidenceGradient)" type="monotone" />
               <Area yAxisId="units" dataKey="confidenceLower" stroke="none" fill="hsl(var(--card))" fillOpacity={1} type="monotone" />
 
-              {/* Revenue bars */}
-              <Bar yAxisId="revenue" dataKey="predictedRevenue" fill="url(#revenueGradient)" radius={[3, 3, 0, 0]} />
+              {/* Revenue bars — thinner with gap */}
+              <Bar yAxisId="revenue" dataKey="predictedRevenue" fill="url(#revenueGradient)" radius={[4, 4, 0, 0]} barSize={18} />
 
-              {/* Units line */}
+              {/* Demand line — smooth monotone curve */}
               <Line yAxisId="units" type="monotone" dataKey="predictedUnits"
                 stroke="hsl(217 91% 60%)" strokeWidth={2.5}
                 dot={({ cx, cy, payload }: any) => {
-                  if (payload.isOptimal) return <circle key="opt" cx={cx} cy={cy} r={6} fill="hsl(152 69% 45%)" stroke="hsl(var(--card))" strokeWidth={2} />;
-                  if (payload.isCurrent) return <circle key="cur" cx={cx} cy={cy} r={6} fill="hsl(38 92% 50%)" stroke="hsl(var(--card))" strokeWidth={2} />;
-                  return <circle key={cx} cx={cx} cy={cy} r={2.5} fill="hsl(217 91% 60%)" strokeWidth={0} />;
+                  if (payload.isOptimal) return <circle key="opt" cx={cx} cy={cy} r={6} fill="hsl(152 69% 45%)" stroke="hsl(var(--card))" strokeWidth={2.5} />;
+                  if (payload.isCurrent) return <circle key="cur" cx={cx} cy={cy} r={6} fill="hsl(38 92% 50%)" stroke="hsl(var(--card))" strokeWidth={2.5} />;
+                  if (optimizationMode === "profit" && payload.isProfitOptimal) return <circle key="profopt" cx={cx} cy={cy} r={5} fill="hsl(280 60% 55%)" stroke="hsl(var(--card))" strokeWidth={2} />;
+                  return <circle key={cx} cx={cx} cy={cy} r={2} fill="hsl(217 91% 60%)" strokeWidth={0} opacity={0.7} />;
                 }}
                 activeDot={{ r: 5, fill: "hsl(217 91% 60%)", stroke: "hsl(var(--card))", strokeWidth: 2 }}
               />
 
               {/* Reference lines */}
               <ReferenceLine yAxisId="units" x={sku.price}
-                stroke="hsl(38 92% 50%)" strokeDasharray="6 4" strokeWidth={1.5}
-                label={{ value: "Current", position: "top", fill: "hsl(38 92% 50%)", fontSize: 10, fontWeight: 600 }}
+                stroke="hsl(38 92% 50%)" strokeDasharray="8 5" strokeWidth={1.5}
+                label={{ value: "▾ Current", position: "top", fill: "hsl(38 92% 50%)", fontSize: 9, fontWeight: 600 }}
               />
               <ReferenceLine yAxisId="units" x={elasticity.revenueMaxPrice}
-                stroke="hsl(152 69% 45%)" strokeDasharray="6 4" strokeWidth={1.5}
-                label={{ value: "Optimum", position: "top", fill: "hsl(152 69% 45%)", fontSize: 10, fontWeight: 600 }}
+                stroke="hsl(152 69% 45%)" strokeDasharray="8 5" strokeWidth={1.5}
+                label={{ value: "▾ Optimum", position: "top", fill: "hsl(152 69% 45%)", fontSize: 9, fontWeight: 600 }}
               />
+              {optimizationMode === "profit" && profitData.profitMaxPrice !== elasticity.revenueMaxPrice && (
+                <ReferenceLine yAxisId="units" x={profitData.profitMaxPrice}
+                  stroke="hsl(280 60% 55%)" strokeDasharray="5 3" strokeWidth={1.5}
+                  label={{ value: "▾ Profit Max", position: "top", fill: "hsl(280 60% 55%)", fontSize: 9, fontWeight: 600 }}
+                />
+              )}
             </ComposedChart>
           </ResponsiveContainer>
         </div>
@@ -383,9 +626,9 @@ const PriceElasticityView = ({ brain }: { brain: RetailBrainState }) => {
       {/* ─── Three-column bottom panels ─── */}
       <div className="grid grid-cols-3 gap-6">
 
-        {/* Markdown Sweet Spot */}
+        {/* Markdown Sweet Spot (ENHANCED) */}
         <div className="rounded-2xl p-5 bg-card border border-border/60 col-span-2">
-          <div className="flex items-center gap-2 mb-5">
+          <div className="flex items-center gap-2 mb-2">
             <div className="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center">
               <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
             </div>
@@ -395,29 +638,63 @@ const PriceElasticityView = ({ brain }: { brain: RetailBrainState }) => {
             </div>
           </div>
 
-          {/* Visual price range bar */}
+          {/* Explanation microcopy */}
+          <div className="mb-4 p-3 rounded-lg bg-emerald-500/[0.03] border border-emerald-500/10">
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              <Eye className="w-3 h-3 inline mr-1 text-emerald-400" />
+              This range represents prices where discounting leads to a <span className="text-emerald-400 font-medium">net revenue gain</span> —
+              the increased volume from lower prices more than compensates for the reduced per-unit revenue.
+            </p>
+          </div>
+
+          {/* Gradient slider bar with zones */}
           <div className="space-y-2">
+            {/* Zone labels */}
+            <div className="flex justify-between items-center text-[9px] font-mono-data">
+              <span className="text-destructive/60">Loss Zone</span>
+              <span className="text-muted-foreground/40">Neutral</span>
+              <span className="text-emerald-400/60">Profit Zone</span>
+            </div>
+
             {/* Labels row */}
             <div className="flex justify-between text-[9px] font-mono-data text-muted-foreground/40">
               <span>${rangeMin.toFixed(0)} (70%)</span>
               <span>${rangeMax.toFixed(0)} (130%)</span>
             </div>
 
-            {/* Track with markers */}
-            <div className="relative h-8">
-              {/* Base track */}
-              <div className="absolute top-3 w-full h-2 rounded-full bg-secondary/30" />
-              {/* Sweet spot fill */}
-              <div className="absolute top-3 h-2 rounded-full bg-gradient-to-r from-emerald-500/30 to-emerald-400/50 transition-all duration-700"
+            {/* Track with gradient and markers */}
+            <div className="relative h-10">
+              {/* Base track with gradient: red → yellow → green */}
+              <div className="absolute top-4 w-full h-2.5 rounded-full overflow-hidden"
+                style={{
+                  background: `linear-gradient(to right, 
+                    hsl(0 72% 51% / 0.25) 0%, 
+                    hsl(38 92% 50% / 0.2) 35%, 
+                    hsl(152 69% 45% / 0.15) 50%, 
+                    hsl(152 69% 45% / 0.35) 65%,
+                    hsl(38 92% 50% / 0.2) 80%,
+                    hsl(0 72% 51% / 0.25) 100%)`
+                }}
+              />
+              {/* Sweet spot fill overlay */}
+              <div className="absolute top-4 h-2.5 rounded-full bg-emerald-400/30 border border-emerald-400/40 transition-all duration-700"
                 style={{ left: `${Math.max(0, sweetSpotLeftPct)}%`, width: `${Math.min(100 - sweetSpotLeftPct, sweetSpotWidthPct)}%` }}
               />
               {/* Current price marker */}
-              <div className="absolute top-0" style={{ left: `${currentPricePct}%`, transform: "translateX(-50%)" }}>
-                <div className="w-0.5 h-8 bg-amber-400/60" />
+              <div className="absolute top-0 group cursor-pointer" style={{ left: `${currentPricePct}%`, transform: "translateX(-50%)" }}>
+                <div className="w-1 h-10 bg-amber-400/70 rounded-full" />
+                <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-amber-400 border-2 border-card shadow-sm" />
+                <div className="absolute -top-5 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity px-2 py-0.5 rounded bg-card/95 border border-border/40 text-[8px] font-mono-data whitespace-nowrap shadow-lg z-10">
+                  Current: ${sku.price.toFixed(0)}
+                </div>
               </div>
               {/* Optimum price marker */}
-              <div className="absolute top-0" style={{ left: `${optimumPricePct}%`, transform: "translateX(-50%)" }}>
-                <div className="w-0.5 h-8 bg-emerald-400/80" />
+              <div className="absolute top-0 group cursor-pointer" style={{ left: `${optimumPricePct}%`, transform: "translateX(-50%)" }}>
+                <div className="w-1 h-10 bg-emerald-400/80 rounded-full" />
+                <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-emerald-400 border-2 border-card shadow-sm" />
+                <div className="absolute -top-5 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity px-2 py-0.5 rounded bg-card/95 border border-border/40 text-[8px] font-mono-data whitespace-nowrap shadow-lg z-10">
+                  Optimal: ${elasticity.revenueMaxPrice.toFixed(0)}
+                </div>
               </div>
             </div>
 
@@ -434,21 +711,24 @@ const PriceElasticityView = ({ brain }: { brain: RetailBrainState }) => {
             </div>
           </div>
 
-          {/* Sweet spot details */}
+          {/* Sweet spot details — fixed ascending discount range */}
           <div className="mt-4 grid grid-cols-3 gap-3">
-            <div className="p-3 rounded-xl bg-secondary/10 border border-border/30">
+            <div className="p-3 rounded-xl bg-secondary/10 border border-border/30 hover:bg-secondary/20 transition-colors">
               <p className="label-micro text-[8px] mb-1">SWEET SPOT LOW</p>
               <p className="text-lg font-light font-mono-data text-emerald-400">${elasticity.markdownSweetSpot.low.toFixed(2)}</p>
+              <p className="text-[9px] text-muted-foreground/40 mt-0.5">Lower bound of optimal range</p>
             </div>
-            <div className="p-3 rounded-xl bg-secondary/10 border border-border/30">
+            <div className="p-3 rounded-xl bg-secondary/10 border border-border/30 hover:bg-secondary/20 transition-colors">
               <p className="label-micro text-[8px] mb-1">SWEET SPOT HIGH</p>
               <p className="text-lg font-light font-mono-data text-emerald-400">${elasticity.markdownSweetSpot.high.toFixed(2)}</p>
+              <p className="text-[9px] text-muted-foreground/40 mt-0.5">Upper bound of optimal range</p>
             </div>
-            <div className="p-3 rounded-xl bg-secondary/10 border border-border/30">
+            <div className="p-3 rounded-xl bg-secondary/10 border border-border/30 hover:bg-secondary/20 transition-colors">
               <p className="label-micro text-[8px] mb-1">DISCOUNT RANGE</p>
               <p className="text-lg font-light font-mono-data text-foreground">
-                {((1 - elasticity.markdownSweetSpot.low / sku.price) * 100).toFixed(0)}–{((1 - elasticity.markdownSweetSpot.high / sku.price) * 100).toFixed(0)}%
+                {Math.abs(discountMin).toFixed(0)}% – {Math.abs(discountMax).toFixed(0)}%
               </p>
+              <p className="text-[9px] text-muted-foreground/40 mt-0.5">Ascending discount range</p>
             </div>
           </div>
 
@@ -476,6 +756,7 @@ const PriceElasticityView = ({ brain }: { brain: RetailBrainState }) => {
                   : `Stable year-round with ${(elasticity.seasonalElasticityBoost * 100).toFixed(0)}% variation`
                 }
               </p>
+              <Microcopy text="Higher seasonal boost means discounts are more effective during peak periods" />
             </div>
           </div>
 
@@ -516,7 +797,105 @@ const PriceElasticityView = ({ brain }: { brain: RetailBrainState }) => {
         </div>
       </div>
 
-      {/* ─── Revenue Impact Curve Table ─── */}
+      {/* ─── Competitor Pricing Trend (NEW) ─── */}
+      {elasticity.competitorTimeline && elasticity.competitorTimeline.length > 0 && (
+        <div className="rounded-2xl p-5 bg-card border border-border/60 surface-glow">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                <TrendingDown className="w-3.5 h-3.5 text-amber-400" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-foreground">Competitor Pricing Trend</p>
+                <p className="text-[10px] text-muted-foreground/50">30-day pricing comparison · Your price vs competitor</p>
+                <Microcopy text="Track how competitor pricing evolves relative to yours. Red-highlighted areas indicate active undercutting." />
+              </div>
+            </div>
+            {competitorInsight && (
+              <div className="flex items-center gap-3">
+                <div className="text-right">
+                  <p className={`text-xs font-semibold font-mono-data ${competitorInsight.priceDrop > 0 ? "text-amber-400" : "text-emerald-400"}`}>
+                    {competitorInsight.direction === "dropped" ? "↓" : "↑"} {Math.abs(competitorInsight.priceDrop)}%
+                  </p>
+                  <p className="text-[9px] text-muted-foreground/40">over {competitorInsight.totalDays} days</p>
+                </div>
+                <div className="w-px h-8 bg-border/30" />
+                <div className="text-right">
+                  <p className="text-xs font-semibold font-mono-data text-destructive">
+                    {competitorInsight.undercutDays} days
+                  </p>
+                  <p className="text-[9px] text-muted-foreground/40">undercut events</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Insight banner */}
+          {competitorInsight && competitorInsight.priceDrop > 2 && (
+            <div className="mb-4 p-2.5 rounded-lg bg-amber-500/[0.04] border border-amber-500/10 flex items-center gap-2">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <p className="text-[11px] text-muted-foreground">
+                Competitor {competitorInsight.direction} price by <span className="text-amber-400 font-medium">{Math.abs(competitorInsight.priceDrop)}%</span> over
+                last <span className="text-foreground font-medium">{competitorInsight.totalDays} days</span>,
+                with <span className="text-destructive font-medium">{competitorInsight.undercutDays} undercut events</span>.
+              </p>
+            </div>
+          )}
+
+          <div style={{ height: 240 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={elasticity.competitorTimeline} margin={{ top: 10, right: 30, left: 10, bottom: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.2} vertical={false} />
+                <XAxis
+                  dataKey="day"
+                  tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 9 }}
+                  interval={4}
+                  axisLine={{ stroke: "hsl(var(--border))", strokeOpacity: 0.3 }}
+                  label={{ value: "Time (Days)", position: "bottom", offset: 3, style: { fill: "hsl(var(--muted-foreground))", fontSize: 10, fontWeight: 500 } }}
+                />
+                <YAxis
+                  tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }}
+                  tickFormatter={(v: number) => `$${Math.round(v)}`}
+                  axisLine={false} tickLine={false}
+                  domain={['dataMin - 20', 'dataMax + 20']}
+                  label={{ value: "Price ($)", angle: -90, position: "insideLeft", offset: -5, style: { fill: "hsl(var(--muted-foreground))", fontSize: 10, fontWeight: 500 } }}
+                />
+                <Tooltip content={<CompetitorTooltip />} />
+
+                {/* Your price line */}
+                <Line type="monotone" dataKey="yourPrice"
+                  stroke="hsl(217 91% 60%)" strokeWidth={2} strokeDasharray="6 3"
+                  dot={false} name="Your Price"
+                />
+                {/* Competitor price line */}
+                <Line type="monotone" dataKey="competitorPrice"
+                  stroke="hsl(38 92% 50%)" strokeWidth={2}
+                  dot={({ cx, cy, payload }: any) => {
+                    if (payload.isUndercut) return <circle key={cx} cx={cx} cy={cy} r={3} fill="hsl(0 72% 51%)" stroke="hsl(var(--card))" strokeWidth={1.5} />;
+                    return <circle key={cx} cx={cx} cy={cy} r={0} />;
+                  }}
+                  name="Competitor"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Legend */}
+          <div className="flex items-center justify-center gap-6 mt-2 text-[9px] text-muted-foreground/50">
+            <span className="flex items-center gap-1.5">
+              <span className="w-4 h-0 border-t-2 border-dashed border-primary inline-block" /> Your Price
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-4 h-0.5 bg-amber-400 inline-block rounded" /> Competitor Price
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-destructive inline-block" /> Undercut Event
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Revenue Impact by Price Point (ENHANCED) ─── */}
       <div className="rounded-2xl p-5 bg-card border border-border/60">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
@@ -526,29 +905,63 @@ const PriceElasticityView = ({ brain }: { brain: RetailBrainState }) => {
             <div>
               <p className="text-sm font-semibold text-foreground">Revenue Impact by Price Point</p>
               <p className="text-[10px] text-muted-foreground/50">Δ Revenue vs current price at each multiplier</p>
+              <Microcopy text="Each bar shows the revenue difference compared to your current price. Green = gain, Red = loss." />
             </div>
           </div>
+          {/* Summary insight */}
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/[0.04] border border-emerald-500/10">
+            <TrendingUp className="w-3 h-3 text-emerald-400" />
+            <p className="text-[10px] text-muted-foreground">
+              Best range: <span className="text-emerald-400 font-medium font-mono-data">${bestRange.low.toFixed(0)} – ${bestRange.high.toFixed(0)}</span>
+            </p>
+          </div>
         </div>
-        <div className="grid grid-cols-13 gap-1">
-          {curveData.map((pt) => {
+        <div className="grid grid-cols-13 gap-1.5">
+          {curveData.map((pt, idx) => {
             const delta = pt.predictedRevenue - currentRevenue;
             const isPositive = delta > 0;
             const maxDelta = Math.max(...curveData.map(p => Math.abs(p.predictedRevenue - currentRevenue)));
-            const barHeight = maxDelta > 0 ? Math.abs(delta) / maxDelta * 48 : 0;
+            const barHeight = maxDelta > 0 ? Math.abs(delta) / maxDelta * 56 : 0;
+            const pctChange = currentRevenue > 0 ? ((delta / currentRevenue) * 100) : 0;
+            const isHovered = hoveredBarIdx === idx;
 
             return (
-              <div key={pt.price} className="flex flex-col items-center">
+              <div key={pt.price} className="flex flex-col items-center relative"
+                onMouseEnter={() => setHoveredBarIdx(idx)}
+                onMouseLeave={() => setHoveredBarIdx(null)}
+              >
+                {/* Hover tooltip */}
+                {isHovered && (
+                  <div className="absolute -top-24 left-1/2 -translate-x-1/2 z-20">
+                    <RevenueBarTooltip data={pt} currentRevenue={currentRevenue} />
+                  </div>
+                )}
+
+                {/* Labels on top of bar */}
+                <div className="h-7 flex flex-col items-center justify-end mb-0.5">
+                  <p className={`text-[7px] font-mono-data font-semibold ${isPositive ? "text-emerald-400" : delta < 0 ? "text-destructive/80" : "text-muted-foreground/40"}`}>
+                    {pctChange >= 0 ? "+" : ""}{pctChange.toFixed(0)}%
+                  </p>
+                </div>
+
                 {/* Bar */}
-                <div className="relative w-full h-12 flex items-end justify-center">
+                <div className="relative w-full h-14 flex items-end justify-center cursor-pointer">
                   <div
                     className={`w-full rounded-t-sm transition-all duration-500 ${
-                      pt.isCurrent ? "bg-amber-400/40" :
-                      pt.isOptimal ? "bg-emerald-400/50" :
-                      isPositive ? "bg-emerald-400/20" : "bg-destructive/15"
-                    }`}
-                    style={{ height: `${barHeight}px` }}
+                      pt.isCurrent ? "bg-amber-400/50 ring-1 ring-amber-400/30" :
+                      pt.isOptimal ? "bg-emerald-400/60 ring-1 ring-emerald-400/30" :
+                      isPositive ? "bg-emerald-400/25 hover:bg-emerald-400/40" :
+                      delta < 0 ? "bg-destructive/20 hover:bg-destructive/30" :
+                      "bg-muted-foreground/10"
+                    } ${isHovered ? "scale-x-110 brightness-110" : ""}`}
+                    style={{ height: `${Math.max(2, barHeight)}px`, transition: "height 0.5s ease, transform 0.2s ease" }}
                   />
+                  {/* Current price baseline marker */}
+                  {pt.isCurrent && (
+                    <div className="absolute -bottom-0 w-full h-px bg-amber-400/60" />
+                  )}
                 </div>
+
                 {/* Multiplier label */}
                 <p className={`text-[8px] font-mono-data mt-1 ${
                   pt.isCurrent ? "text-amber-400 font-bold" :
@@ -557,8 +970,9 @@ const PriceElasticityView = ({ brain }: { brain: RetailBrainState }) => {
                 }`}>
                   {(pt.priceMultiplier * 100).toFixed(0)}%
                 </p>
-                {/* Delta value */}
-                <p className={`text-[8px] font-mono-data ${isPositive ? "text-emerald-400" : "text-destructive/70"}`}>
+
+                {/* Delta label */}
+                <p className={`text-[7px] font-mono-data ${isPositive ? "text-emerald-400" : delta < 0 ? "text-destructive/70" : "text-muted-foreground/30"}`}>
                   {isPositive ? "+" : ""}{delta > 999 || delta < -999
                     ? `${(delta / 1000).toFixed(0)}k`
                     : Math.round(delta)}
@@ -568,10 +982,11 @@ const PriceElasticityView = ({ brain }: { brain: RetailBrainState }) => {
           })}
         </div>
         <div className="flex items-center justify-center gap-6 mt-3 text-[9px] text-muted-foreground/40">
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-amber-400/40 inline-block" /> Current Price</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-400/50 inline-block" /> Revenue Optimum</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-400/20 inline-block" /> Revenue Gain</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-destructive/15 inline-block" /> Revenue Loss</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-amber-400/50 inline-block" /> Current Price</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-400/60 inline-block" /> Revenue Optimum</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-400/25 inline-block" /> Revenue Gain</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-destructive/20 inline-block" /> Revenue Loss</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-muted-foreground/10 inline-block" /> Neutral</span>
         </div>
       </div>
     </div>
