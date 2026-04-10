@@ -8,7 +8,7 @@ import type {
   OrchestrationAlert, SKUPriority, KPI,
   DynamicNotification, NotificationSummary,
   MigrationEdge, MigrationNode, DemandMigrationGraph,
-  ElasticityResult, ElasticityPoint,
+  ElasticityResult, ElasticityPoint, CompetitorPriceTrendPoint,
   RegistryDemandResult, RegistryEvent, RegistryWeekBucket,
 } from "./types";
 import { getSKU, getStore, skuCatalog, stores } from "./brands";
@@ -1236,6 +1236,33 @@ export function generateElasticity(skuId: string): ElasticityResult {
   // Competitor anchor: typically 10–20% cheaper
   const competitorAnchor = parseFloat((sku.price * (0.88 + rng() * 0.18)).toFixed(2));
 
+  // Generate 30-day competitor pricing timeline
+  const competitorTimeline: CompetitorPriceTrendPoint[] = [];
+  const trendRng = seeded(hashStr(skuId + "comptimeline"));
+  let competitorRunningPrice = competitorAnchor * (1.02 + trendRng() * 0.06); // start slightly higher than anchor
+  const yourRunningPrice = sku.price; // your price is stable
+  for (let d = 0; d < 30; d++) {
+    // Random walk for competitor: drift downward with occasional bumps
+    const dailyChange = (trendRng() - 0.55) * sku.price * 0.012; // slight downward bias
+    competitorRunningPrice = Math.max(
+      sku.price * 0.75,
+      Math.min(sku.price * 1.15, competitorRunningPrice + dailyChange)
+    );
+    // Occasional significant price drops (simulate a sale)
+    if (trendRng() > 0.92) {
+      competitorRunningPrice -= sku.price * (0.03 + trendRng() * 0.05);
+    }
+    const undercutPct = parseFloat((((competitorRunningPrice - yourRunningPrice) / yourRunningPrice) * 100).toFixed(1));
+    competitorTimeline.push({
+      day: `Day ${d + 1}`,
+      dayIndex: d + 1,
+      yourPrice: parseFloat(yourRunningPrice.toFixed(2)),
+      competitorPrice: parseFloat(competitorRunningPrice.toFixed(2)),
+      isUndercut: competitorRunningPrice < yourRunningPrice,
+      undercutPct,
+    });
+  }
+
   // Seasonal elasticity boost
   const seasonalElasticityBoost = sku.seasonalPeak.length > 0
     ? parseFloat((0.1 + rng() * 0.25).toFixed(2))
@@ -1255,6 +1282,7 @@ export function generateElasticity(skuId: string): ElasticityResult {
     markdownSweetSpot,
     curve,
     competitorAnchor,
+    competitorTimeline,
     seasonalElasticityBoost,
     narrative,
   };

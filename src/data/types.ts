@@ -352,6 +352,15 @@ export interface ElasticityPoint {
   confidenceUpper: number;   // upper bound units
 }
 
+export interface CompetitorPriceTrendPoint {
+  day: string;            // "Day 1", "Day 2", ...
+  dayIndex: number;
+  yourPrice: number;
+  competitorPrice: number;
+  isUndercut: boolean;     // true when competitor < your price
+  undercutPct: number;     // % below your price (negative if above)
+}
+
 export interface ElasticityResult {
   skuId: string;
   currentPrice: number;
@@ -363,6 +372,7 @@ export interface ElasticityResult {
   markdownSweetSpot: { low: number; high: number };  // price range where discount generates net gain
   curve: ElasticityPoint[];        // 13 points from 0.7x to 1.3x in 0.05 steps
   competitorAnchor: number;        // simulated competitor reference price for this category
+  competitorTimeline: CompetitorPriceTrendPoint[];  // 30-day competitor pricing trend
   seasonalElasticityBoost: number; // how much more elastic demand is during peak season (0–1)
   narrative: string;               // 1–2 sentence plain-English insight
 }
