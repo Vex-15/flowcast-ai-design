@@ -60,7 +60,7 @@ export function useRetailBrain() {
   const returnExplanation = useMemo(() => generateExplanation(selectedSKU, "return_risk"), [selectedSKU]);
   const alerts = useMemo(() => generateAlerts(), []);
   const priorities = useMemo(() => generateSKUPriorities(), []);
-  const kpis = useMemo(() => generateKPIs(), []);
+  const kpis = useMemo(() => generateKPIs(selectedBrand), [selectedBrand]);
   const notificationSummary = useMemo(() => getNotificationSummary(notifications), [notifications]);
   const migrationGraph = useMemo(() => generateMigrationGraph(), []);
   const elasticity = useMemo(() => generateElasticity(selectedSKU), [selectedSKU]);

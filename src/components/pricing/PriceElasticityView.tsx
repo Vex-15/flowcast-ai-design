@@ -313,21 +313,7 @@ const PriceElasticityView = ({ brain }: { brain: RetailBrainState }) => {
     isProfitOptimal: pt.price === profitData.profitMaxPrice,
   }));
 
-  // Competitor timeline analytics
-  const competitorInsight = useMemo(() => {
-    const timeline = elasticity.competitorTimeline;
-    if (!timeline || timeline.length === 0) return null;
-    const firstPrice = timeline[0].competitorPrice;
-    const lastPrice = timeline[timeline.length - 1].competitorPrice;
-    const priceDrop = ((firstPrice - lastPrice) / firstPrice) * 100;
-    const undercutDays = timeline.filter(d => d.isUndercut).length;
-    return {
-      priceDrop: parseFloat(priceDrop.toFixed(1)),
-      direction: priceDrop > 0 ? "dropped" : "increased",
-      undercutDays,
-      totalDays: timeline.length,
-    };
-  }, [elasticity.competitorTimeline]);
+
 
   // Best performing revenue range
   const bestRange = useMemo(() => {
@@ -797,103 +783,179 @@ const PriceElasticityView = ({ brain }: { brain: RetailBrainState }) => {
         </div>
       </div>
 
-      {/* ─── Competitor Pricing Trend (NEW) ─── */}
-      {elasticity.competitorTimeline && elasticity.competitorTimeline.length > 0 && (
-        <div className="rounded-2xl p-5 bg-card border border-border/60 surface-glow">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-amber-500/10 flex items-center justify-center">
-                <TrendingDown className="w-3.5 h-3.5 text-amber-400" />
+      {/* ─── Competitor Pricing Trend (ENHANCED) ─── */}
+      {elasticity.competitorTimeline && elasticity.competitorTimeline.length > 0 && (() => {
+        // Pre-compute undercut zone data for area fill
+        const enrichedTimeline = elasticity.competitorTimeline.map((d, i) => ({
+          ...d,
+          undercutZone: d.isUndercut ? d.yourPrice : null,
+          undercutBaseline: d.isUndercut ? d.competitorPrice : null,
+          // Detect significant price drops (>2% in a single day)
+          isPriceDrop: i > 0 && (
+            (elasticity.competitorTimeline[i - 1].competitorPrice - d.competitorPrice)
+            / elasticity.competitorTimeline[i - 1].competitorPrice > 0.02
+          ),
+          priceDropPct: i > 0
+            ? parseFloat((
+                (elasticity.competitorTimeline[i - 1].competitorPrice - d.competitorPrice)
+                / elasticity.competitorTimeline[i - 1].competitorPrice * 100
+              ).toFixed(1))
+            : 0,
+        }));
+
+        // Enhanced insight computation
+        const firstPrice = elasticity.competitorTimeline[0].competitorPrice;
+        const lastPrice = elasticity.competitorTimeline[elasticity.competitorTimeline.length - 1].competitorPrice;
+        const totalChange = ((firstPrice - lastPrice) / firstPrice) * 100;
+        const undercutDays = elasticity.competitorTimeline.filter(d => d.isUndercut).length;
+        const totalDays = elasticity.competitorTimeline.length;
+        const undercutPct = ((undercutDays / totalDays) * 100).toFixed(0);
+        const avgUndercutMargin = elasticity.competitorTimeline
+          .filter(d => d.isUndercut)
+          .reduce((sum, d) => sum + Math.abs(d.undercutPct), 0) / Math.max(1, undercutDays);
+        const priceDropEvents = enrichedTimeline.filter(d => d.isPriceDrop).length;
+        const direction = totalChange > 0 ? "reduced" : "increased";
+        const pressure = undercutDays > totalDays * 0.5 ? "high" : undercutDays > totalDays * 0.25 ? "moderate" : "low";
+        const pressureColor = pressure === "high" ? "text-destructive" : pressure === "moderate" ? "text-amber-400" : "text-emerald-400";
+
+        return (
+          <div className="rounded-2xl p-5 bg-card border border-border/60 surface-glow">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                  <TrendingDown className="w-3.5 h-3.5 text-amber-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Competitor Pricing Trend</p>
+                  <p className="text-[10px] text-muted-foreground/50">{totalDays}-day pricing comparison · Your price vs competitor</p>
+                </div>
               </div>
-              <div>
-                <p className="text-sm font-semibold text-foreground">Competitor Pricing Trend</p>
-                <p className="text-[10px] text-muted-foreground/50">30-day pricing comparison · Your price vs competitor</p>
-                <Microcopy text="Track how competitor pricing evolves relative to yours. Red-highlighted areas indicate active undercutting." />
-              </div>
-            </div>
-            {competitorInsight && (
+              {/* Stats pills */}
               <div className="flex items-center gap-3">
                 <div className="text-right">
-                  <p className={`text-xs font-semibold font-mono-data ${competitorInsight.priceDrop > 0 ? "text-amber-400" : "text-emerald-400"}`}>
-                    {competitorInsight.direction === "dropped" ? "↓" : "↑"} {Math.abs(competitorInsight.priceDrop)}%
+                  <p className={`text-xs font-semibold font-mono-data ${totalChange > 0 ? "text-amber-400" : "text-emerald-400"}`}>
+                    {totalChange > 0 ? "↓" : "↑"} {Math.abs(totalChange).toFixed(1)}%
                   </p>
-                  <p className="text-[9px] text-muted-foreground/40">over {competitorInsight.totalDays} days</p>
+                  <p className="text-[9px] text-muted-foreground/40">price change</p>
                 </div>
                 <div className="w-px h-8 bg-border/30" />
                 <div className="text-right">
                   <p className="text-xs font-semibold font-mono-data text-destructive">
-                    {competitorInsight.undercutDays} days
+                    {undercutDays} days
                   </p>
                   <p className="text-[9px] text-muted-foreground/40">undercut events</p>
                 </div>
+                <div className="w-px h-8 bg-border/30" />
+                <div className="text-right">
+                  <p className="text-xs font-semibold font-mono-data text-amber-400">
+                    {priceDropEvents}
+                  </p>
+                  <p className="text-[9px] text-muted-foreground/40">price drops</p>
+                </div>
               </div>
-            )}
-          </div>
-
-          {/* Insight banner */}
-          {competitorInsight && competitorInsight.priceDrop > 2 && (
-            <div className="mb-4 p-2.5 rounded-lg bg-amber-500/[0.04] border border-amber-500/10 flex items-center gap-2">
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <p className="text-[11px] text-muted-foreground">
-                Competitor {competitorInsight.direction} price by <span className="text-amber-400 font-medium">{Math.abs(competitorInsight.priceDrop)}%</span> over
-                last <span className="text-foreground font-medium">{competitorInsight.totalDays} days</span>,
-                with <span className="text-destructive font-medium">{competitorInsight.undercutDays} undercut events</span>.
-              </p>
             </div>
-          )}
 
-          <div style={{ height: 240 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={elasticity.competitorTimeline} margin={{ top: 10, right: 30, left: 10, bottom: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.2} vertical={false} />
-                <XAxis
-                  dataKey="day"
-                  tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 9 }}
-                  interval={4}
-                  axisLine={{ stroke: "hsl(var(--border))", strokeOpacity: 0.3 }}
-                  label={{ value: "Time (Days)", position: "bottom", offset: 3, style: { fill: "hsl(var(--muted-foreground))", fontSize: 10, fontWeight: 500 } }}
-                />
-                <YAxis
-                  tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }}
-                  tickFormatter={(v: number) => `$${Math.round(v)}`}
-                  axisLine={false} tickLine={false}
-                  domain={['dataMin - 20', 'dataMax + 20']}
-                  label={{ value: "Price ($)", angle: -90, position: "insideLeft", offset: -5, style: { fill: "hsl(var(--muted-foreground))", fontSize: 10, fontWeight: 500 } }}
-                />
-                <Tooltip content={<CompetitorTooltip />} />
+            {/* Dynamic Insight banner */}
+            <div className="mb-4 p-3 rounded-xl bg-gradient-to-r from-amber-500/[0.04] to-destructive/[0.04] border border-amber-500/10">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Competitor <span className="text-foreground font-medium">{direction}</span> price by{" "}
+                  <span className="text-amber-400 font-semibold">{Math.abs(totalChange).toFixed(1)}%</span> over the last{" "}
+                  <span className="text-foreground font-medium">{totalDays} days</span>,{" "}
+                  {undercutDays > 0 ? (
+                    <>
+                      undercutting your price on{" "}
+                      <span className="text-destructive font-semibold">{undercutDays} days ({undercutPct}%)</span>
+                      {" "}by an average of <span className="text-destructive font-medium">{avgUndercutMargin.toFixed(1)}%</span>.{" "}
+                    </>
+                  ) : "maintaining prices above your level."}
+                  Competitive pressure is <span className={`font-semibold ${pressureColor}`}>{pressure}</span>.
+                </p>
+              </div>
+            </div>
 
-                {/* Your price line */}
-                <Line type="monotone" dataKey="yourPrice"
-                  stroke="hsl(217 91% 60%)" strokeWidth={2} strokeDasharray="6 3"
-                  dot={false} name="Your Price"
-                />
-                {/* Competitor price line */}
-                <Line type="monotone" dataKey="competitorPrice"
-                  stroke="hsl(38 92% 50%)" strokeWidth={2}
-                  dot={({ cx, cy, payload }: any) => {
-                    if (payload.isUndercut) return <circle key={cx} cx={cx} cy={cy} r={3} fill="hsl(0 72% 51%)" stroke="hsl(var(--card))" strokeWidth={1.5} />;
-                    return <circle key={cx} cx={cx} cy={cy} r={0} />;
-                  }}
-                  name="Competitor"
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            <div style={{ height: 280 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={enrichedTimeline} margin={{ top: 10, right: 30, left: 10, bottom: 25 }}>
+                  <defs>
+                    <linearGradient id="yourPriceGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="hsl(217 91% 60%)" stopOpacity={0.15} />
+                      <stop offset="100%" stopColor="hsl(217 91% 60%)" stopOpacity={0.02} />
+                    </linearGradient>
+                    <linearGradient id="compPriceGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="hsl(38 92% 50%)" stopOpacity={0.15} />
+                      <stop offset="100%" stopColor="hsl(38 92% 50%)" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.15} vertical={false} />
+                  <XAxis
+                    dataKey="day"
+                    tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 9 }}
+                    interval={4}
+                    axisLine={{ stroke: "hsl(var(--border))", strokeOpacity: 0.3 }}
+                    label={{ value: "Time (Days)", position: "bottom", offset: 8, style: { fill: "hsl(var(--muted-foreground))", fontSize: 10, fontWeight: 500 } }}
+                  />
+                  <YAxis
+                    tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }}
+                    tickFormatter={(v: number) => `$${Math.round(v)}`}
+                    axisLine={false} tickLine={false}
+                    domain={['dataMin - 20', 'dataMax + 20']}
+                    label={{ value: "Price ($)", angle: -90, position: "insideLeft", offset: -5, style: { fill: "hsl(var(--muted-foreground))", fontSize: 10, fontWeight: 500 } }}
+                  />
+                  <Tooltip content={<CompetitorTooltip />} />
+
+                  {/* Your price line — smooth monotone with subtle fill */}
+                  <Line type="monotone" dataKey="yourPrice"
+                    stroke="hsl(217 91% 60%)" strokeWidth={2.5}
+                    dot={false} name="Your Price"
+                    strokeLinecap="round"
+                  />
+                  {/* Competitor price line — smooth monotone */}
+                  <Line type="monotone" dataKey="competitorPrice"
+                    stroke="hsl(38 92% 50%)" strokeWidth={2.5}
+                    dot={({ cx, cy, payload }: any) => {
+                      // Highlight undercut events with red dots
+                      if (payload.isUndercut) return (
+                        <g key={cx}>
+                          <circle cx={cx} cy={cy} r={5} fill="hsl(0 72% 51%)" fillOpacity={0.15} />
+                          <circle cx={cx} cy={cy} r={3} fill="hsl(0 72% 51%)" stroke="hsl(var(--card))" strokeWidth={1.5} />
+                        </g>
+                      );
+                      // Highlight significant price drops
+                      if (payload.isPriceDrop) return (
+                        <g key={cx}>
+                          <circle cx={cx} cy={cy} r={5} fill="hsl(38 92% 50%)" fillOpacity={0.2} />
+                          <circle cx={cx} cy={cy} r={3} fill="hsl(38 92% 50%)" stroke="hsl(var(--card))" strokeWidth={1.5} />
+                        </g>
+                      );
+                      return <circle key={cx} cx={cx} cy={cy} r={0} />;
+                    }}
+                    name="Competitor"
+                    strokeLinecap="round"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Enhanced Legend */}
+            <div className="flex items-center justify-center gap-6 mt-3 text-[10px] text-muted-foreground/60">
+              <span className="flex items-center gap-1.5">
+                <span className="w-5 h-0.5 bg-primary rounded-full inline-block" /> Your Price
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-5 h-0.5 bg-amber-400 rounded-full inline-block" /> Competitor Price
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-destructive/80 inline-block" /> Undercut Event
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-400/80 inline-block" /> Price Drop
+              </span>
+            </div>
           </div>
-
-          {/* Legend */}
-          <div className="flex items-center justify-center gap-6 mt-2 text-[9px] text-muted-foreground/50">
-            <span className="flex items-center gap-1.5">
-              <span className="w-4 h-0 border-t-2 border-dashed border-primary inline-block" /> Your Price
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-4 h-0.5 bg-amber-400 inline-block rounded" /> Competitor Price
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-destructive inline-block" /> Undercut Event
-            </span>
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ─── Revenue Impact by Price Point (ENHANCED) ─── */}
       <div className="rounded-2xl p-5 bg-card border border-border/60">

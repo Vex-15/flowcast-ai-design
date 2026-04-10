@@ -987,15 +987,100 @@ export function generateSKUPriorities(): SKUPriority[] {
   }).sort((a, b) => b.priorityScore - a.priorityScore);
 }
 
-// ─── KPIs ─────────────────────────────────────────────────
-export function generateKPIs(): KPI[] {
+// ─── KPIs (DYNAMIC per brand) ─────────────────────────────
+export function generateKPIs(brandId?: string): KPI[] {
+  const filteredSKUs = brandId && brandId !== "all"
+    ? skuCatalog.filter(s => s.brand === brandId)
+    : skuCatalog;
+
+  const rng = seeded(hashStr((brandId || "all") + "kpiCalc"));
+
+  // ── Revenue calculation: aggregate weekly revenue across SKUs ──
+  let totalWeeklyRevenue = 0;
+  let stockoutCount = 0;
+  let overstockValue = 0;
+  let totalReturnRate = 0;
+  let totalForecastAccuracy = 0;
+  let alertCount = 0;
+
+  filteredSKUs.forEach(sku => {
+    const inv = generateInventoryDecision(sku.id);
+    const ret = generateReturnAnalysis(sku.id);
+    const forecast = generateDemandForecast(sku.id, 7);
+
+    // Weekly revenue: daily sell-through × price × 7
+    const dailySellThrough = Math.max(1, Math.round(inv.currentStock / Math.max(1, inv.daysUntilStockout)));
+    totalWeeklyRevenue += dailySellThrough * sku.price * 7;
+
+    // Stockouts: count SKUs with ≤3 days supply
+    if (inv.daysUntilStockout <= 3) stockoutCount++;
+
+    // Overstock: value of excess inventory (>21 days supply)
+    if (inv.daysUntilStockout > 21) {
+      const excessDays = inv.daysUntilStockout - 21;
+      const excessUnits = Math.round(dailySellThrough * excessDays);
+      overstockValue += excessUnits * sku.price;
+    }
+
+    // Return rate: weighted average by demand volume
+    totalReturnRate += ret.returnRate * dailySellThrough;
+
+    // Forecast accuracy: compare actuals to predicted
+    const forecastWithActuals = forecast.filter(f => f.actual !== undefined);
+    if (forecastWithActuals.length > 0) {
+      const accuracy = forecastWithActuals.reduce((sum, f) => {
+        const error = Math.abs((f.actual! - f.predicted) / f.predicted);
+        return sum + (1 - error);
+      }, 0) / forecastWithActuals.length;
+      totalForecastAccuracy += accuracy;
+    }
+  });
+
+  // Normalize
+  const totalDailySellThrough = filteredSKUs.reduce((sum, sku) => {
+    const inv = generateInventoryDecision(sku.id);
+    return sum + Math.max(1, Math.round(inv.currentStock / Math.max(1, inv.daysUntilStockout)));
+  }, 0);
+
+  const avgReturnRate = totalDailySellThrough > 0
+    ? (totalReturnRate / totalDailySellThrough) * 100
+    : 8.0;
+
+  const avgForecastAccuracy = filteredSKUs.length > 0
+    ? (totalForecastAccuracy / filteredSKUs.length) * 100
+    : 90.0;
+
+  // Count alerts for this brand
+  const allAlerts = generateAlerts();
+  const brandAlerts = brandId && brandId !== "all"
+    ? allAlerts.filter(a => a.brand === brandId)
+    : allAlerts;
+  alertCount = brandAlerts.length;
+
+  // Format revenue ($X.XM or $XXXK)
+  const fmtRevenue = totalWeeklyRevenue >= 1_000_000
+    ? `$${(totalWeeklyRevenue / 1_000_000).toFixed(1)}M`
+    : `$${Math.round(totalWeeklyRevenue / 1000)}K`;
+
+  const fmtOverstock = overstockValue >= 1_000_000
+    ? `$${(overstockValue / 1_000_000).toFixed(1)}M`
+    : `$${Math.round(overstockValue / 1000)}K`;
+
+  // Seeded "deltas" so they remain stable per brand
+  const revDelta = parseFloat((5 + rng() * 8).toFixed(1));
+  const stockDelta = -Math.round(20 + rng() * 40);
+  const overstockDelta = parseFloat((5 + rng() * 15).toFixed(1));
+  const returnDelta = -parseFloat((0.5 + rng() * 3).toFixed(1));
+  const accuracyDelta = parseFloat((0.5 + rng() * 2.5).toFixed(1));
+  const alertDelta = Math.round(-5 + rng() * 30);
+
   return [
-    { label: "Weekly Revenue",    value: "$2.4M",  change: 8.3,   trend: "up",     icon: "revenue" },
-    { label: "Active Stockouts",  value: "3",      change: -40,   trend: "down",   icon: "stockout" },
-    { label: "Overstock Value",   value: "$182K",  change: 12.5,  trend: "up",     icon: "overstock" },
-    { label: "Return Rate",       value: "8.2%",   change: -2.1,  trend: "down",   icon: "returns" },
-    { label: "Forecast Accuracy", value: "94.1%",  change: 1.8,   trend: "up",     icon: "accuracy" },
-    { label: "Active Alerts",     value: "12",     change: 15,    trend: "up",     icon: "alerts" },
+    { label: "Weekly Revenue",    value: fmtRevenue,                            change: revDelta,       trend: "up",     icon: "revenue" },
+    { label: "Active Stockouts",  value: String(stockoutCount),                 change: stockDelta,     trend: "down",   icon: "stockout" },
+    { label: "Overstock Value",   value: fmtOverstock,                          change: overstockDelta, trend: "up",     icon: "overstock" },
+    { label: "Return Rate",       value: `${avgReturnRate.toFixed(1)}%`,        change: returnDelta,    trend: "down",   icon: "returns" },
+    { label: "Forecast Accuracy", value: `${avgForecastAccuracy.toFixed(1)}%`,  change: accuracyDelta,  trend: "up",     icon: "accuracy" },
+    { label: "Active Alerts",     value: String(alertCount),                    change: alertDelta,     trend: alertDelta > 0 ? "up" : "down", icon: "alerts" },
   ];
 }
 
