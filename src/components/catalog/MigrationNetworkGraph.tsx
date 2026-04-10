@@ -12,6 +12,7 @@ export default function MigrationNetworkGraph({ graph, selectedNode, onNodeClick
   const [nodes, setNodes] = useState<MigrationNode[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -25,35 +26,58 @@ export default function MigrationNetworkGraph({ graph, selectedNode, onNodeClick
     return () => observer.disconnect();
   }, []);
 
-  // Initialize and run simple static force layout
+  // Initialize and run improved force layout with better spacing
   useEffect(() => {
     if (!graph || graph.nodes.length === 0) return;
 
-    // Clone nodes so we can mutate positions locally
     const simNodes = graph.nodes.map(n => ({ ...n }));
 
-    // Re-center around width/height
     const cx = dimensions.width / 2;
     const cy = dimensions.height / 2;
     
-    const maxIter = 100;
-    const K = 8000; // Repulsion constant
-    const springLen = 120;
-    const springK = 0.03;
-    const centerForce = 0.03;
+    // Improved force parameters for better node separation
+    const maxIter = 150;
+    const K = 18000;           // Much stronger repulsion to push nodes apart
+    const springLen = 180;     // Longer spring rest length
+    const springK = 0.02;      // Slightly softer springs
+    const centerForce = 0.025; // Slightly weaker center pull
+    const minNodeDist = 80;    // Minimum distance between any two nodes
+    const padding = 50;        // Keep nodes away from edges
+
+    // Initialize positions in a circle for better starting layout
+    const angleStep = (2 * Math.PI) / simNodes.length;
+    const initRadius = Math.min(dimensions.width, dimensions.height) * 0.3;
+    simNodes.forEach((n, i) => {
+      n.x = cx + Math.cos(angleStep * i) * initRadius;
+      n.y = cy + Math.sin(angleStep * i) * initRadius;
+      n.vx = 0;
+      n.vy = 0;
+    });
 
     for (let iter = 0; iter < maxIter; iter++) {
-      // Repulsion
+      const alpha = 1 - iter / maxIter; // cooling factor
+
+      // Repulsion between all nodes
       for (let i = 0; i < simNodes.length; i++) {
         for (let j = i + 1; j < simNodes.length; j++) {
           const u = simNodes[i];
           const v = simNodes[j];
-          const dx = u.x - v.x;
-          const dy = u.y - v.y;
-          const distSq = dx*dx + dy*dy;
-          if (distSq > 0 && distSq < 150000) {
-            const dist = Math.sqrt(distSq);
-            const force = K / distSq;
+          let dx = u.x - v.x;
+          let dy = u.y - v.y;
+          let distSq = dx * dx + dy * dy;
+          
+          // Prevent zero distance
+          if (distSq < 1) {
+            dx = (Math.random() - 0.5) * 2;
+            dy = (Math.random() - 0.5) * 2;
+            distSq = dx * dx + dy * dy;
+          }
+          
+          const dist = Math.sqrt(distSq);
+          
+          // Strong repulsion at close range
+          if (dist < 400) {
+            const force = (K / distSq) * alpha;
             const fx = (dx / dist) * force;
             const fy = (dy / dist) * force;
             u.vx += fx;
@@ -61,12 +85,23 @@ export default function MigrationNetworkGraph({ graph, selectedNode, onNodeClick
             v.vx -= fx;
             v.vy -= fy;
           }
+
+          // Hard minimum distance enforcement
+          if (dist < minNodeDist) {
+            const pushForce = (minNodeDist - dist) * 0.5;
+            const pfx = (dx / dist) * pushForce;
+            const pfy = (dy / dist) * pushForce;
+            u.vx += pfx;
+            u.vy += pfy;
+            v.vx -= pfx;
+            v.vy -= pfy;
+          }
         }
         
         // Center force
         const u = simNodes[i];
-        u.vx += (cx - u.x) * centerForce;
-        u.vy += (cy - u.y) * centerForce;
+        u.vx += (cx - u.x) * centerForce * alpha;
+        u.vy += (cy - u.y) * centerForce * alpha;
       }
 
       // Springs (Edges)
@@ -76,9 +111,9 @@ export default function MigrationNetworkGraph({ graph, selectedNode, onNodeClick
         if (!u || !v) return;
         const dx = v.x - u.x;
         const dy = v.y - u.y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
+        const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist > 0) {
-          const force = (dist - springLen) * springK;
+          const force = (dist - springLen) * springK * alpha;
           const fx = (dx / dist) * force;
           const fy = (dy / dist) * force;
           u.vx += fx;
@@ -92,11 +127,11 @@ export default function MigrationNetworkGraph({ graph, selectedNode, onNodeClick
       simNodes.forEach(n => {
         n.x += n.vx;
         n.y += n.vy;
-        n.vx *= 0.6; // Friction
-        n.vy *= 0.6;
-        // Keep within bounds
-        n.x = Math.max(30, Math.min(dimensions.width - 30, n.x));
-        n.y = Math.max(30, Math.min(dimensions.height - 30, n.y));
+        n.vx *= 0.55; // Friction
+        n.vy *= 0.55;
+        // Keep within bounds with padding
+        n.x = Math.max(padding, Math.min(dimensions.width - padding, n.x));
+        n.y = Math.max(padding, Math.min(dimensions.height - padding, n.y));
       });
     }
 
@@ -105,8 +140,30 @@ export default function MigrationNetworkGraph({ graph, selectedNode, onNodeClick
 
   const maxRev = useMemo(() => Math.max(...(graph?.nodes.map(n => n.revenueVelocity) || [1])), [graph]);
 
+  // Determine which nodes are connected to the selected or hovered node
+  const activeNodeId = hoveredNode || selectedNode?.skuId || null;
+  const connectedNodeIds = useMemo(() => {
+    if (!activeNodeId) return new Set<string>();
+    const ids = new Set<string>();
+    ids.add(activeNodeId);
+    graph.edges.forEach(e => {
+      if (e.fromSkuId === activeNodeId) ids.add(e.toSkuId);
+      if (e.toSkuId === activeNodeId) ids.add(e.fromSkuId);
+    });
+    return ids;
+  }, [activeNodeId, graph.edges]);
+
   return (
-    <div ref={containerRef} className="w-full h-full min-h-[500px] bg-background border border-border/20 rounded-2xl relative overflow-hidden">
+    <div ref={containerRef} className="w-full h-full min-h-[500px] bg-background/80 border border-border/15 rounded-2xl relative overflow-hidden">
+      {/* Subtle grid background */}
+      <div 
+        className="absolute inset-0 opacity-[0.03]" 
+        style={{
+          backgroundImage: `radial-gradient(circle, hsl(var(--muted-foreground)) 1px, transparent 1px)`,
+          backgroundSize: '24px 24px'
+        }}
+      />
+      
       <svg className="absolute inset-0 w-full h-full">
         {/* Edges */}
         <g strokeLinecap="round">
@@ -117,22 +174,22 @@ export default function MigrationNetworkGraph({ graph, selectedNode, onNodeClick
             
             const dx = v.x - u.x;
             const dy = v.y - u.y;
-            const dist = Math.sqrt(dx*dx + dy*dy);
+            const dist = Math.sqrt(dx * dx + dy * dy);
             if (dist === 0) return null;
             const nx = -dy / dist;
             const ny = dx / dist;
 
-            // Simple quadratic bezier curve offset
-            const cx = (u.x + v.x) / 2 + nx * 50;
-            const cy = (u.y + v.y) / 2 + ny * 50;
+            // Smaller curve offset for cleaner paths
+            const ctrlX = (u.x + v.x) / 2 + nx * 30;
+            const ctrlY = (u.y + v.y) / 2 + ny * 30;
 
-            const d = `M ${u.x} ${u.y} Q ${cx} ${cy} ${v.x} ${v.y}`;
-            const isHighlighted = selectedNode?.skuId === u.skuId || selectedNode?.skuId === v.skuId;
-            const isDimmed = selectedNode && !isHighlighted;
-            // Base opacity off migration probability and selection state
-            let opacity = Math.max(0.15, edge.probability * 0.8);
+            const d = `M ${u.x} ${u.y} Q ${ctrlX} ${ctrlY} ${v.x} ${v.y}`;
+            const isHighlighted = activeNodeId === u.skuId || activeNodeId === v.skuId;
+            const isDimmed = activeNodeId && !isHighlighted;
+            
+            let opacity = Math.max(0.12, edge.probability * 0.6);
             if (isHighlighted) opacity = Math.max(0.5, edge.probability * 1.2);
-            if (isDimmed) opacity = 0.05;
+            if (isDimmed) opacity = 0.04;
 
             const isCriticalSource = u.stockStatus === 'critical' || u.stockStatus === 'low';
             const strokeColor = isCriticalSource ? "hsl(0 72% 51%)" : "url(#edgeGradient)";
@@ -143,23 +200,34 @@ export default function MigrationNetworkGraph({ graph, selectedNode, onNodeClick
                 d={d}
                 fill="none"
                 stroke={strokeColor}
-                strokeWidth={Math.max(1, edge.probability * 8)}
+                strokeWidth={Math.max(1, edge.probability * 6)}
                 opacity={opacity}
-                className={`transition-all duration-300 ${isCriticalSource ? "animate-pulse" : ""}`}
+                className="transition-all duration-300"
+                strokeDasharray={isCriticalSource ? "6 3" : "none"}
               />
             );
           })}
         </g>
         
-        {/* Nodes */}
-        {nodes.map(node => {
+        {/* Nodes — rendered in two passes: non-selected first, then selected on top */}
+        {nodes
+          .sort((a, b) => {
+            // Selected/hovered node renders last (on top)
+            if (a.skuId === activeNodeId) return 1;
+            if (b.skuId === activeNodeId) return -1;
+            return 0;
+          })
+          .map(node => {
           const brand = getBrand(node.brand);
-          const radius = 6 + (node.revenueVelocity / maxRev) * 14; 
+          const radius = 8 + (node.revenueVelocity / maxRev) * 16; 
           const isCritical = node.stockStatus === "critical" || node.stockStatus === "low";
           const isSelected = selectedNode?.skuId === node.skuId;
-          const isDimmed = selectedNode && !isSelected && 
-                           !graph.edges.some(e => (e.fromSkuId === node.skuId && e.toSkuId === selectedNode.skuId) || 
-                                                  (e.toSkuId === node.skuId && e.fromSkuId === selectedNode.skuId));
+          const isHovered = hoveredNode === node.skuId;
+          const isActive = isSelected || isHovered;
+          const isDimmed = activeNodeId && !connectedNodeIds.has(node.skuId);
+
+          // Only show label if: node is active, connected to active, or no active node at all
+          const showLabel = !activeNodeId || connectedNodeIds.has(node.skuId);
 
           return (
             <g 
@@ -167,43 +235,96 @@ export default function MigrationNetworkGraph({ graph, selectedNode, onNodeClick
               transform={`translate(${node.x},${node.y})`} 
               className="cursor-pointer" 
               onClick={() => onNodeClick(node)}
-              opacity={isDimmed ? 0.3 : 1}
-              style={{ transition: 'opacity 0.3s' }}
+              onMouseEnter={() => setHoveredNode(node.skuId)}
+              onMouseLeave={() => setHoveredNode(null)}
+              opacity={isDimmed ? 0.15 : 1}
+              style={{ transition: 'opacity 0.3s, transform 0.3s' }}
             >
+              {/* Critical pulse ring */}
               {isCritical && (
-                <circle r={radius + 8} fill="none" stroke="hsl(0 72% 51%)" strokeWidth="2" className="animate-ping opacity-20" />
+                <circle r={radius + 10} fill="none" stroke="hsl(0 72% 51%)" strokeWidth="1.5" className="animate-ping opacity-15" />
               )}
-              {isSelected && (
-                <circle r={radius + 5} fill="none" stroke="hsl(var(--primary))" strokeWidth="2" />
+              {/* Selection ring */}
+              {isActive && (
+                <circle 
+                  r={radius + 6} 
+                  fill="none" 
+                  stroke={`hsl(${isSelected ? 'var(--primary)' : brand.color})`} 
+                  strokeWidth="2" 
+                  opacity="0.6"
+                  strokeDasharray="4 2"
+                />
               )}
+              {/* Glow behind node */}
+              {isActive && (
+                <circle 
+                  r={radius + 3} 
+                  fill={`hsl(${brand.color} / 0.15)`} 
+                />
+              )}
+              {/* Main node circle */}
               <circle
                 r={radius}
                 fill={`hsl(${brand.color})`}
                 stroke={isCritical ? "hsl(0 72% 51%)" : "hsl(var(--background))"}
-                strokeWidth={isCritical ? "3" : "2"}
-                className="transition-all hover:brightness-110"
+                strokeWidth={isCritical ? "2.5" : "2"}
+                className="transition-all duration-200"
+                style={{ filter: isActive ? `drop-shadow(0 0 8px hsl(${brand.color} / 0.5))` : 'none' }}
               />
-              <text 
-                y={radius + 14} 
-                textAnchor="middle" 
-                fill="currentColor" 
-                fontSize="10" 
-                className="text-foreground pointer-events-none drop-shadow-md font-medium"
-                opacity={isSelected ? 1 : 0.6}
-              >
-                {node.skuName}
-              </text>
+              {/* Label — only shown contextually for readability */}
+              {showLabel && (
+                <g>
+                  {/* Label background pill for readability */}
+                  <rect 
+                    x={-(node.skuName.length * 2.8 + 8)} 
+                    y={radius + 6} 
+                    width={node.skuName.length * 5.6 + 16} 
+                    height={18} 
+                    rx={9} 
+                    fill="hsl(var(--background) / 0.85)" 
+                    stroke="hsl(var(--border) / 0.2)"
+                    strokeWidth="0.5"
+                    opacity={isActive ? 1 : 0.7}
+                  />
+                  <text 
+                    y={radius + 19} 
+                    textAnchor="middle" 
+                    fill="currentColor" 
+                    fontSize="10" 
+                    className="text-foreground pointer-events-none font-medium"
+                    opacity={isActive ? 1 : 0.7}
+                  >
+                    {node.skuName.length > 22 ? node.skuName.slice(0, 20) + "…" : node.skuName}
+                  </text>
+                </g>
+              )}
             </g>
           );
         })}
 
         <defs>
           <linearGradient id="edgeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="hsl(var(--muted-foreground))" stopOpacity="0.3" />
-            <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity="0.5" />
+            <stop offset="0%" stopColor="hsl(var(--muted-foreground))" stopOpacity="0.2" />
+            <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity="0.4" />
           </linearGradient>
         </defs>
       </svg>
+
+      {/* Legend */}
+      <div className="absolute bottom-4 left-4 flex items-center gap-4 px-3 py-2 rounded-xl glass-strong text-[10px] text-muted-foreground">
+        <div className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded-full bg-destructive/80 border border-destructive" />
+          Critical / Low Stock
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded-full bg-emerald-500/80 border border-emerald-600/50" />
+          Healthy Stock
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-6 border-t-2 border-dashed border-destructive/50" />
+          At-Risk Path
+        </div>
+      </div>
     </div>
   );
 }
