@@ -9,6 +9,7 @@ import ReturnsView from "@/components/returns/ReturnsView";
 import InventoryView from "@/components/inventory/InventoryView";
 import SimulationView from "@/components/simulation/SimulationView";
 import ExplainView from "@/components/explainability/ExplainView";
+import CatalogIntelligenceView from "@/components/catalog/CatalogIntelligenceView";
 
 const Dashboard = () => {
   const brain = useRetailBrain();
@@ -17,6 +18,9 @@ const Dashboard = () => {
     switch (brain.activeView) {
       case "executive":
         return <ExecutiveView brain={brain} />;
+
+      case "catalog-intelligence":
+        return <CatalogIntelligenceView brain={brain} />;
 
       case "sku-deep-dive":
         return <SKUDeepDive brain={brain} />;

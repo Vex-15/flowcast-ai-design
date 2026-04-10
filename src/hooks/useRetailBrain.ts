@@ -16,6 +16,7 @@ import {
   generateKPIs,
   generateDynamicNotifications,
   getNotificationSummary,
+  generateMigrationGraph,
 } from "@/data/generators";
 
 const defaultSimParams: SimulationParams = {
@@ -58,6 +59,7 @@ export function useRetailBrain() {
   const priorities = useMemo(() => generateSKUPriorities(), []);
   const kpis = useMemo(() => generateKPIs(), []);
   const notificationSummary = useMemo(() => getNotificationSummary(notifications), [notifications]);
+  const migrationGraph = useMemo(() => generateMigrationGraph(), []);
 
   const selectSKUAndNavigate = useCallback((skuId: string) => {
     setSelectedSKU(skuId);
@@ -125,6 +127,7 @@ export function useRetailBrain() {
     kpis,
     notifications,
     notificationSummary,
+    migrationGraph,
 
     // Actions
     selectSKUAndNavigate,

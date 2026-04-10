@@ -281,6 +281,11 @@ export interface SKUPriority {
   priorityScore: number;  // 0–100
   riskFactors: string[];
   primaryConcern: string;
+  // ─── NEW: Migration Risk ───
+  migrationRisk: "high_absorber" | "source_at_risk" | "dual_risk" | "none";
+  migrationRiskScore: number;   // 0–100
+  absorbsFromSkus: string[];    // SKU IDs this SKU absorbs demand from
+  sendsToSkus: string[];        // SKU IDs this SKU sends demand to when OOS
 }
 
 // ─── Dashboard KPIs ────────────────────────────────────────
@@ -292,6 +297,46 @@ export interface KPI {
   icon: string;
 }
 
+// ─── Demand Migration Network ──────────────────────────────
+export interface MigrationEdge {
+  fromSkuId: string;
+  toSkuId: string;
+  probability: number;           // 0–1 fraction of demand that flows
+  weeklyDemandAtRisk: number;    // $ value
+  historicalAbsorptionRate: number; // 0–1 confidence in this edge
+  isActive: boolean;             // true when source is critical/low stock
+}
+
+export interface MigrationNode {
+  skuId: string;
+  skuName: string;
+  brand: string;
+  category: string;
+  revenueVelocity: number;       // weekly $ revenue (sizes the node)
+  stockStatus: "critical" | "low" | "ok" | "overstock";
+  daysSupply: number;
+  weeklyDemandValue: number;     // $ at stake if this node goes OOS
+  // edges this node participates in
+  outgoingEdges: MigrationEdge[]; // if this SKU goes OOS, demand flows here
+  incomingEdges: MigrationEdge[]; // demand from other OOS SKUs flows here
+  lostProbability: number;        // 0–1 fraction lost when OOS
+  deferredProbability: number;    // 0–1 fraction deferred when OOS
+  // layout (set by force simulation)
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+}
+
+export interface DemandMigrationGraph {
+  nodes: MigrationNode[];
+  edges: MigrationEdge[];
+  totalWeeklyDemandAtRisk: number;  // $ across all critical/low SKUs
+  criticalNodeCount: number;
+  lostDemandEstimate: number;        // $ lost if all critical nodes stock out
+  absorbedDemandEstimate: number;    // $ that can be captured by substitutes
+}
+
 export type DashboardView =
   | "executive"
   | "sku-deep-dive"
@@ -300,4 +345,5 @@ export type DashboardView =
   | "returns"
   | "inventory"
   | "simulation"
-  | "explainability";
+  | "explainability"
+  | "catalog-intelligence";

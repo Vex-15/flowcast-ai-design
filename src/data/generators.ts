@@ -7,6 +7,7 @@ import type {
   Explanation, FeatureImportance, ConfidenceBreakdown, ConfidenceSegment,
   OrchestrationAlert, SKUPriority, KPI,
   DynamicNotification, NotificationSummary,
+  MigrationEdge, MigrationNode, DemandMigrationGraph,
 } from "./types";
 import { getSKU, getStore, skuCatalog, stores } from "./brands";
 
@@ -892,6 +893,17 @@ export function generateAlerts(): OrchestrationAlert[] {
 
 // ─── SKU Priority Scores ──────────────────────────────────
 export function generateSKUPriorities(): SKUPriority[] {
+  // Pre-build migration graph to enrich priority data
+  const migGraph = generateMigrationGraph();
+  const absorberMap = new Map<string, string[]>(); // skuId -> list of source skuIds it absorbs from
+  const senderMap   = new Map<string, string[]>(); // skuId -> list of target skuIds it sends to
+  migGraph.edges.forEach((e) => {
+    if (!absorberMap.has(e.toSkuId))   absorberMap.set(e.toSkuId,   []);
+    if (!senderMap.has(e.fromSkuId))   senderMap.set(e.fromSkuId,   []);
+    absorberMap.get(e.toSkuId)!.push(e.fromSkuId);
+    senderMap.get(e.fromSkuId)!.push(e.toSkuId);
+  });
+
   return skuCatalog.map((sku) => {
     const rng = seeded(hashStr(sku.id + "priority"));
     const inv = generateInventoryDecision(sku.id);
@@ -910,6 +922,25 @@ export function generateSKUPriorities(): SKUPriority[] {
     if (rng() > 0.5) factors.push("Rising intent signals");
     if (sku.seasonalPeak.length > 0) factors.push(`Seasonal peak: ${sku.seasonalPeak[0]}`);
 
+    // Migration risk classification
+    const absorbsFrom = absorberMap.get(sku.id) || [];
+    const sendsTo     = senderMap.get(sku.id)   || [];
+    const isSourceAtRisk = inv.daysUntilStockout < 7 || inv.stockoutRisk > 0.55;
+    // absorbers from critical sources are high absorbers
+    const criticalSources = absorbsFrom.filter((srcId) => {
+      const srcInv = generateInventoryDecision(srcId);
+      return srcInv.daysUntilStockout < 7 || srcInv.stockoutRisk > 0.55;
+    });
+    const isHighAbsorber = criticalSources.length > 0;
+    const migrationRiskScore = Math.min(100, Math.round(
+      (isHighAbsorber ? 40 : 0) + (isSourceAtRisk ? 40 : 0) + Math.min(20, criticalSources.length * 10)
+    ));
+    const migrationRisk: SKUPriority["migrationRisk"] =
+      isHighAbsorber && isSourceAtRisk ? "dual_risk"
+      : isHighAbsorber ? "high_absorber"
+      : isSourceAtRisk && sendsTo.length > 0 ? "source_at_risk"
+      : "none";
+
     return {
       skuId: sku.id,
       skuName: sku.name,
@@ -917,6 +948,10 @@ export function generateSKUPriorities(): SKUPriority[] {
       priorityScore: score,
       riskFactors: factors,
       primaryConcern: factors[0] || "Monitoring",
+      migrationRisk,
+      migrationRiskScore,
+      absorbsFromSkus: absorbsFrom,
+      sendsToSkus: sendsTo,
     };
   }).sort((a, b) => b.priorityScore - a.priorityScore);
 }
@@ -931,4 +966,150 @@ export function generateKPIs(): KPI[] {
     { label: "Forecast Accuracy", value: "94.1%",  change: 1.8,   trend: "up",     icon: "accuracy" },
     { label: "Active Alerts",     value: "12",     change: 15,    trend: "up",     icon: "alerts" },
   ];
+}
+
+// ─── Demand Migration Graph ────────────────────────────────
+export function generateMigrationGraph(filterCategory?: string): DemandMigrationGraph {
+  // Group skus by category
+  const categoryMap = new Map<string, typeof skuCatalog>();
+  skuCatalog.forEach((sku) => {
+    if (!categoryMap.has(sku.category)) categoryMap.set(sku.category, []);
+    categoryMap.get(sku.category)!.push(sku);
+  });
+
+  const allNodes: MigrationNode[] = [];
+  const allEdges: MigrationEdge[] = [];
+
+  // Pre-calculate inventory for all SKUs
+  const invCache = new Map<string, ReturnType<typeof generateInventoryDecision>>();
+  skuCatalog.forEach((sku) => {
+    invCache.set(sku.id, generateInventoryDecision(sku.id));
+  });
+
+  skuCatalog.forEach((sku) => {
+    const inv = invCache.get(sku.id)!;
+    // Revenue velocity: weekly demand estimate × price
+    const weeklyUnits = Math.max(5, Math.round(inv.currentStock / Math.max(1, inv.daysUntilStockout) * 7));
+    const revenueVelocity = weeklyUnits * sku.price;
+    const weeklyDemandValue = revenueVelocity;
+
+    // Stock status from store breakdown aggregate
+    const criticalStores = inv.storeBreakdown.filter((s) => s.status === "critical").length;
+    const lowStores      = inv.storeBreakdown.filter((s) => s.status === "low").length;
+    const stockStatus: MigrationNode["stockStatus"] =
+      criticalStores >= 2 || inv.daysUntilStockout <= 3 ? "critical"
+      : lowStores >= 2 || inv.daysUntilStockout <= 7 ? "low"
+      : inv.overstockRisk > 0.5 ? "overstock"
+      : "ok";
+
+    allNodes.push({
+      skuId: sku.id,
+      skuName: sku.name,
+      brand: sku.brand,
+      category: sku.category,
+      revenueVelocity,
+      stockStatus,
+      daysSupply: inv.daysUntilStockout,
+      weeklyDemandValue,
+      outgoingEdges: [],
+      incomingEdges: [],
+      lostProbability: 0,
+      deferredProbability: 0,
+      x: 0, y: 0, vx: 0, vy: 0,
+    });
+  });
+
+  // Build migration edges: only within same category, requires 2+ SKUs
+  categoryMap.forEach((skusInCat) => {
+    if (skusInCat.length < 2) return;
+
+    skusInCat.forEach((fromSku) => {
+      const fromNode = allNodes.find((n) => n.skuId === fromSku.id)!;
+      const isAtRisk = fromNode.stockStatus === "critical" || fromNode.stockStatus === "low";
+
+      // Potential absorbers: all other SKUs in category that are NOT critical
+      const absorbers = skusInCat.filter(
+        (s) => s.id !== fromSku.id && allNodes.find((n) => n.skuId === s.id)?.stockStatus !== "critical"
+      );
+      if (absorbers.length === 0) return;
+
+      // Distribute migration probability: ~55–65% absorbed, ~25–33% lost, 7–15% deferred
+      const rng = seeded(hashStr(fromSku.id + "migration"));
+      const totalAbsorbed = 0.52 + rng() * 0.15; // 52–67%
+      const lost          = 0.22 + rng() * 0.12; // 22–34%
+      const deferred      = parseFloat((1 - totalAbsorbed - lost).toFixed(3));
+
+      fromNode.lostProbability = parseFloat(lost.toFixed(3));
+      fromNode.deferredProbability = Math.max(0, parseFloat(deferred.toFixed(3)));
+
+      // Distribute absorbed portion across absorbers (weighted by revenue velocity)
+      const absorberVelocities = absorbers.map((s) => {
+        const r = seeded(hashStr(s.id + fromSku.id + "vel"));
+        return Math.max(1, allNodes.find((n) => n.skuId === s.id)!.revenueVelocity + r() * 1000);
+      });
+      const totalVelocity = absorberVelocities.reduce((a, v) => a + v, 0);
+
+      absorbers.forEach((toSku, idx) => {
+        const edgeRng = seeded(hashStr(fromSku.id + toSku.id + "edge"));
+        const probability = parseFloat((totalAbsorbed * absorberVelocities[idx] / totalVelocity).toFixed(3));
+        if (probability < 0.03) return; // skip negligible edges
+
+        const weeklyDemandAtRisk = Math.round(fromNode.weeklyDemandValue * probability);
+        const edge: MigrationEdge = {
+          fromSkuId: fromSku.id,
+          toSkuId: toSku.id,
+          probability,
+          weeklyDemandAtRisk,
+          historicalAbsorptionRate: parseFloat((0.6 + edgeRng() * 0.35).toFixed(2)),
+          isActive: isAtRisk,
+        };
+
+        allEdges.push(edge);
+        fromNode.outgoingEdges.push(edge);
+        const toNode = allNodes.find((n) => n.skuId === toSku.id)!;
+        toNode.incomingEdges.push(edge);
+      });
+    });
+  });
+
+  // Apply initial force layout positions in a grid-like structure
+  // Use a simple categorical layout: group by category horizontally
+  const categoryList = Array.from(categoryMap.keys());
+  const filteredNodes = filterCategory
+    ? allNodes.filter((n) => n.category === filterCategory)
+    : allNodes;
+
+  // Assign initial positions using a deterministic grid
+  filteredNodes.forEach((node) => {
+    const catIdx = categoryList.indexOf(node.category);
+    const catNodes = filteredNodes.filter((n) => n.category === node.category);
+    const posInCat = catNodes.indexOf(node);
+    const cols = Math.ceil(Math.sqrt(filteredNodes.length));
+    const catCol = catIdx % cols;
+    const catRow = Math.floor(catIdx / cols);
+    const rng2 = seeded(hashStr(node.skuId + "pos"));
+    node.x = catCol * 220 + posInCat * 80 + rng2() * 30 + 80;
+    node.y = catRow * 200 + rng2() * 40 + 80;
+  });
+
+  const criticalNodes  = filteredNodes.filter((n) => n.stockStatus === "critical");
+  const lowNodes       = filteredNodes.filter((n) => n.stockStatus === "low");
+  const atRiskNodes    = [...criticalNodes, ...lowNodes];
+  const totalAtRisk    = atRiskNodes.reduce((s, n) => s + n.weeklyDemandValue, 0);
+  const lostEstimate   = atRiskNodes.reduce((s, n) => s + n.weeklyDemandValue * n.lostProbability, 0);
+  const absorbEstimate = atRiskNodes.reduce((s, n) => s + n.weeklyDemandValue * (1 - n.lostProbability - n.deferredProbability), 0);
+
+  return {
+    nodes: filterCategory ? filteredNodes : allNodes,
+    edges: filterCategory
+      ? allEdges.filter((e) => {
+          const fn = allNodes.find((n) => n.skuId === e.fromSkuId);
+          return fn?.category === filterCategory;
+        })
+      : allEdges,
+    totalWeeklyDemandAtRisk: Math.round(totalAtRisk),
+    criticalNodeCount: criticalNodes.length,
+    lostDemandEstimate: Math.round(lostEstimate),
+    absorbedDemandEstimate: Math.round(absorbEstimate),
+  };
 }

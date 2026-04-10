@@ -2,7 +2,7 @@ import type { RetailBrainState } from "@/hooks/useRetailBrain";
 import { getBrand } from "@/data/brands";
 import {
   DollarSign, AlertTriangle, Undo2, Target,
-  TrendingUp, TrendingDown, ArrowRight, Zap,
+  TrendingUp, TrendingDown, ArrowRight, Zap, Ban, Network,
 } from "lucide-react";
 
 const ExecutiveView = ({ brain }: { brain: RetailBrainState }) => {
@@ -114,10 +114,11 @@ const ExecutiveView = ({ brain }: { brain: RetailBrainState }) => {
             {/* Table header */}
             <div className="grid grid-cols-12 gap-2 px-3 py-2">
               <span className="col-span-1 label-micro text-[8px]">#</span>
-              <span className="col-span-4 label-micro text-[8px]">SKU</span>
+              <span className="col-span-3 label-micro text-[8px]">SKU</span>
               <span className="col-span-2 label-micro text-[8px]">BRAND</span>
               <span className="col-span-2 label-micro text-[8px]">CONCERN</span>
-              <span className="col-span-3 label-micro text-[8px] text-right">SCORE</span>
+              <span className="col-span-2 label-micro text-[8px]">MIGRATION RISK</span>
+              <span className="col-span-2 label-micro text-[8px] text-right">SCORE</span>
             </div>
 
             {brain.priorities.slice(0, 8).map((sku, i) => {
@@ -125,26 +126,38 @@ const ExecutiveView = ({ brain }: { brain: RetailBrainState }) => {
               const scoreColor = sku.priorityScore > 70
                 ? "text-destructive" : sku.priorityScore > 40
                 ? "text-amber-400" : "text-emerald-400";
+              
+              const migBadge = sku.migrationRisk === "dual_risk"
+                ? <span className="inline-flex items-center gap-1 text-[9px] font-medium text-destructive bg-destructive/10 px-1.5 py-0.5 rounded"><AlertTriangle className="w-2.5 h-2.5"/>Dual Risk</span>
+                : sku.migrationRisk === "high_absorber"
+                ? <span className="inline-flex items-center gap-1 text-[9px] font-medium text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded"><Network className="w-2.5 h-2.5"/>High Absorber</span>
+                : sku.migrationRisk === "source_at_risk"
+                ? <span className="inline-flex items-center gap-1 text-[9px] font-medium text-destructive bg-destructive/10 px-1.5 py-0.5 rounded"><ArrowRight className="w-2.5 h-2.5"/>Source Risk</span>
+                : <span className="inline-flex items-center gap-1 text-[9px] font-medium text-muted-foreground bg-secondary px-1.5 py-0.5 rounded">None</span>;
+
               return (
                 <div
                   key={sku.skuId}
                   onClick={() => brain.selectSKUAndNavigate(sku.skuId)}
                   className="group grid grid-cols-12 gap-2 items-center px-3 py-2.5 rounded-lg cursor-pointer
-                    hover:bg-secondary/40 transition-all"
+                    hover:bg-secondary/40 transition-all border border-transparent hover:border-border/30"
                 >
                   <span className="col-span-1 text-[11px] text-muted-foreground/40 font-mono-data">{i + 1}</span>
-                  <span className="col-span-4 text-[12px] text-foreground font-medium truncate group-hover:text-primary transition-colors">
+                  <span className="col-span-3 text-[12px] text-foreground font-medium truncate group-hover:text-primary transition-colors pr-2">
                     {sku.skuName}
                   </span>
                   <span
-                    className="col-span-2 text-[10px] font-medium truncate"
+                    className="col-span-2 text-[10px] font-medium truncate pr-2"
                     style={{ color: `hsl(${brand.color})` }}
                   >
                     {brand.shortName}
                   </span>
-                  <span className="col-span-2 text-[10px] text-muted-foreground truncate">{sku.primaryConcern}</span>
-                  <div className="col-span-3 flex items-center justify-end gap-2">
-                    <div className="w-16 h-1 bg-secondary/50 rounded-full overflow-hidden">
+                  <span className="col-span-2 text-[10px] text-muted-foreground truncate pr-2">{sku.primaryConcern}</span>
+                  <div className="col-span-2 flex items-center pr-2">
+                     {migBadge}
+                  </div>
+                  <div className="col-span-2 flex items-center justify-end gap-2">
+                    <div className="w-12 h-1 bg-secondary/50 rounded-full overflow-hidden">
                       <div
                         className="h-full rounded-full transition-all duration-500"
                         style={{
@@ -155,7 +168,7 @@ const ExecutiveView = ({ brain }: { brain: RetailBrainState }) => {
                         }}
                       />
                     </div>
-                    <span className={`text-xs font-mono-data font-semibold ${scoreColor}`}>
+                    <span className={`text-xs font-mono-data font-semibold ${scoreColor} w-6 text-right`}>
                       {sku.priorityScore}
                     </span>
                   </div>
