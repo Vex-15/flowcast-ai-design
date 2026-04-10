@@ -309,11 +309,11 @@ const SimulationView = ({
                         <stop offset="100%" stopColor="hsl(152 69% 45%)" stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(225 12% 14%)" vertical={false} />
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="day" tick={{ fontSize: 10, fill: "hsl(220 10% 40%)" }} axisLine={false} tickLine={false} interval={3} dy={8} />
                     <YAxis tick={{ fontSize: 10, fill: "hsl(220 10% 40%)" }} axisLine={false} tickLine={false} />
                     <Tooltip
-                      contentStyle={{ background: "hsl(225 15% 9%)", border: "1px solid hsl(225 12% 16%)", borderRadius: "10px", fontSize: "11px" }}
+                      contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "10px", fontSize: "11px", color: "hsl(var(--foreground))", boxShadow: "0 8px 32px -8px rgba(0,0,0,0.15)" }}
                     />
                     {result.stockoutDay && (
                       <ReferenceLine x={`Day ${result.stockoutDay}`} stroke="hsl(0 72% 51%)" strokeWidth={1} strokeDasharray="4 4" />
@@ -323,11 +323,11 @@ const SimulationView = ({
                   </AreaChart>
                 ) : activeChart === "forecast" ? (
                   <ComposedChart data={result.forecastComparison} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(225 12% 14%)" vertical={false} />
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="day" tick={{ fontSize: 10, fill: "hsl(220 10% 40%)" }} axisLine={false} tickLine={false} interval={3} dy={8} />
                     <YAxis tick={{ fontSize: 10, fill: "hsl(220 10% 40%)" }} axisLine={false} tickLine={false} />
                     <Tooltip
-                      contentStyle={{ background: "hsl(225 15% 9%)", border: "1px solid hsl(225 12% 16%)", borderRadius: "10px", fontSize: "11px" }}
+                      contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "10px", fontSize: "11px", color: "hsl(var(--foreground))", boxShadow: "0 8px 32px -8px rgba(0,0,0,0.15)" }}
                     />
                     <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "10px" }} iconSize={10} />
                     <Bar dataKey="baseline" fill="hsl(217 91% 60% / 0.15)" radius={[3, 3, 0, 0]} name="Baseline Forecast" />
@@ -336,11 +336,11 @@ const SimulationView = ({
                   </ComposedChart>
                 ) : (
                   <AreaChart data={result.confidenceInterval.map(d => ({ ...d, confidence: [d.lower, d.upper] }))} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(225 12% 14%)" vertical={false} />
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="day" tick={{ fontSize: 10, fill: "hsl(220 10% 40%)" }} axisLine={false} tickLine={false} interval={3} dy={8} />
                     <YAxis tick={{ fontSize: 10, fill: "hsl(220 10% 40%)" }} axisLine={false} tickLine={false} />
                     <Tooltip
-                      contentStyle={{ background: "hsl(225 15% 9%)", border: "1px solid hsl(225 12% 16%)", borderRadius: "10px", fontSize: "11px" }}
+                      contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "10px", fontSize: "11px", color: "hsl(var(--foreground))", boxShadow: "0 8px 32px -8px rgba(0,0,0,0.15)" }}
                     />
                     <Area type="monotone" dataKey="confidence" stroke="none" fill="#9333ea" fillOpacity={0.15} name="95% CI Range" />
                     <Line type="monotone" dataKey="mean" stroke="hsl(217 91% 60%)" strokeWidth={3} dot={false} name="Expected Forecast" />

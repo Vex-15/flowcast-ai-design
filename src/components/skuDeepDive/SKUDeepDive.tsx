@@ -97,10 +97,10 @@ const HealthGauge = ({ score }: { score: number }) => {
   return (
     <div className="flex flex-col items-center justify-center">
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        <path d={pathD} fill="none" stroke="hsl(225 12% 14%)" strokeWidth={strokeWidth} strokeLinecap="round" />
+        <path d={pathD} fill="none" stroke="hsl(var(--border))" strokeWidth={strokeWidth} strokeLinecap="round" />
         <path d={pathD} fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeDasharray={`${arcLength}`} strokeDashoffset={dashOffset} style={{ transition: "stroke 0.6s ease" }} />
         <text x={center} y={center - 4} textAnchor="middle" dominantBaseline="central" className="font-mono-data" style={{ fontSize: "36px", fontWeight: 300, fill: color, letterSpacing: "-0.04em" }}>{animatedScore}</text>
-        <text x={center} y={center + 22} textAnchor="middle" dominantBaseline="central" style={{ fontSize: "8px", fontWeight: 600, fill: "hsl(220 10% 45%)", letterSpacing: "0.15em", textTransform: "uppercase" }}>SKU HEALTH</text>
+        <text x={center} y={center + 22} textAnchor="middle" dominantBaseline="central" style={{ fontSize: "8px", fontWeight: 600, fill: "hsl(var(--muted-foreground))", letterSpacing: "0.15em", textTransform: "uppercase" }}>SKU HEALTH</text>
         <text x={center} y={size - 12} textAnchor="middle" dominantBaseline="central" style={{ fontSize: "10px", fontWeight: 600, fill: color }}>{getHealthLabel(animatedScore)}</text>
       </svg>
     </div>

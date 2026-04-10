@@ -34,7 +34,7 @@ const DemandView = ({
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload) return null;
     return (
-      <div className="bg-[hsl(225,15%,9%)] border border-[hsl(225,12%,16%)] rounded-xl p-3 shadow-2xl shadow-black/50">
+      <div className="bg-card border border-border rounded-xl p-3 shadow-2xl shadow-black/10">
         <p className="text-[10px] text-muted-foreground/50 mb-2">{label}</p>
         {payload.map((entry: any, i: number) => {
           if (entry.value === undefined || entry.value === null) return null;
@@ -160,7 +160,7 @@ const DemandView = ({
                   <stop offset="100%" stopColor="hsl(217 91% 60%)" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(225 12% 14%)" vertical={false} />
+              <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis
                 dataKey="date"
                 tick={{ fontSize: 10, fill: "hsl(220 10% 36%)" }}

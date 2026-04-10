@@ -7,32 +7,32 @@
 
 @layer base {
   :root {
-    --background: 228 14% 5%;
-    --foreground: 220 20% 93%;
+    --background: 0 0% 98%;
+    --foreground: 220 14% 10%;
 
-    --card: 225 15% 9%;
-    --card-foreground: 220 20% 93%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 14% 10%;
 
-    --popover: 225 15% 9%;
-    --popover-foreground: 220 20% 93%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 14% 10%;
 
     --primary: 217 91% 60%;
-    --primary-foreground: 222 30% 6%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 225 12% 13%;
-    --secondary-foreground: 220 20% 85%;
+    --secondary: 220 13% 94%;
+    --secondary-foreground: 220 14% 20%;
 
-    --muted: 225 12% 13%;
+    --muted: 220 13% 95%;
     --muted-foreground: 220 10% 46%;
 
     --accent: 265 60% 62%;
-    --accent-foreground: 220 20% 95%;
+    --accent-foreground: 0 0% 100%;
 
     --destructive: 0 72% 51%;
-    --destructive-foreground: 220 20% 95%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 225 12% 14%;
-    --input: 225 12% 14%;
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
     --ring: 217 91% 60%;
 
     --radius: 0.75rem;
@@ -40,20 +40,20 @@
     /* Custom tokens */
     --glow-primary: 217 91% 60%;
     --glow-accent: 265 60% 62%;
-    --surface-elevated: 225 14% 11%;
+    --surface-elevated: 0 0% 100%;
     --success: 152 69% 45%;
-    --success-foreground: 152 69% 90%;
+    --success-foreground: 0 0% 100%;
     --warning: 38 92% 50%;
-    --warning-foreground: 38 92% 15%;
+    --warning-foreground: 0 0% 100%;
     --info: 199 89% 48%;
 
-    --sidebar-background: 228 14% 5%;
-    --sidebar-foreground: 220 20% 93%;
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 220 14% 10%;
     --sidebar-primary: 217 91% 60%;
-    --sidebar-primary-foreground: 222 30% 6%;
-    --sidebar-accent: 225 12% 13%;
-    --sidebar-accent-foreground: 220 20% 93%;
-    --sidebar-border: 225 12% 14%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 13% 94%;
+    --sidebar-accent-foreground: 220 14% 10%;
+    --sidebar-border: 220 13% 91%;
     --sidebar-ring: 217 91% 60%;
   }
 }
@@ -95,7 +95,7 @@
   }
 
   .glass-strong {
-    @apply bg-card/80 backdrop-blur-2xl;
+    @apply bg-card/80 backdrop-blur-2xl shadow-xl;
     border: 1px solid hsl(var(--border) / 0.5);
   }
 
@@ -261,10 +261,10 @@
 
 /* ─── Select styling ─────────────────────────────── */
 select option {
-  background: hsl(225 15% 9%);
-  color: hsl(220 20% 93%);
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
 }
 
 /* ─── Recharts overrides ─────────────────────────── */
-.recharts-cartesian-grid line { stroke: hsl(225 12% 13%) !important; }
-.recharts-text { fill: hsl(220 10% 46%) !important; font-family: 'Outfit', sans-serif !important; }
+.recharts-cartesian-grid line { stroke: hsl(var(--border)) !important; }
+.recharts-text { fill: hsl(var(--muted-foreground)) !important; font-family: 'Outfit', sans-serif !important; }

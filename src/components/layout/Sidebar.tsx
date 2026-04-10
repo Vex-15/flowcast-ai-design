@@ -28,7 +28,7 @@ const Sidebar = ({
     <aside
       className={`fixed top-0 left-0 h-screen z-40 flex flex-col transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]
         ${collapsed ? "w-[68px]" : "w-[240px]"}
-        bg-[hsl(228,14%,4%)] border-r border-border/30`}
+        bg-sidebar border-r border-border/30`}
     >
       {/* Logo */}
       <div className="flex items-center gap-3 px-4 h-14 shrink-0">
