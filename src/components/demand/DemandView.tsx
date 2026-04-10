@@ -22,13 +22,8 @@ const DemandView = ({
   // Filter forecast data by selected horizon
   const filteredForecast = useMemo(() => forecast.slice(0, horizon), [forecast, horizon]);
 
-  // Find the "today" boundary — last data point that has an actual value
-  const todayDate = useMemo(() => {
-    for (let i = filteredForecast.length - 1; i >= 0; i--) {
-      if (filteredForecast[i].actual !== undefined) return filteredForecast[i].date;
-    }
-    return null;
-  }, [filteredForecast]);
+  // Place "Today" marker at the beginning of the forecast
+  const todayDate = filteredForecast[0]?.date || null;
 
   const latest = decomposition[decomposition.length - 1];
   const totalPredicted = filteredForecast.reduce((s, f) => s + f.predicted, 0);
@@ -152,19 +147,17 @@ const DemandView = ({
       <div className="relative -mx-6">
         <div className="h-[320px] w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={filteredForecast} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
+            <AreaChart 
+              data={filteredForecast.map((d) => ({
+                ...d,
+                confidence: [d.lower, d.upper],
+              }))} 
+              margin={{ top: 20, right: 20, left: 0, bottom: 0 }}
+            >
               <defs>
                 <linearGradient id="forecastGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="hsl(217 91% 60%)" stopOpacity={0.15} />
                   <stop offset="100%" stopColor="hsl(217 91% 60%)" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="confBandUpper" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="hsl(265 60% 62%)" stopOpacity={0.12} />
-                  <stop offset="100%" stopColor="hsl(265 60% 62%)" stopOpacity={0.02} />
-                </linearGradient>
-                <linearGradient id="confBandLower" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="hsl(265 60% 62%)" stopOpacity={0.02} />
-                  <stop offset="100%" stopColor="hsl(265 60% 62%)" stopOpacity={0.08} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(225 12% 14%)" vertical={false} />
@@ -181,30 +174,17 @@ const DemandView = ({
                 tickLine={false}
               />
               <Tooltip content={<CustomTooltip />} />
-
-              {/* Today boundary line */}
-              {todayDate && (
-                <ReferenceLine
-                  x={todayDate}
-                  stroke="hsl(220 10% 50%)"
-                  strokeWidth={1.5}
-                  strokeDasharray="4 4"
-                  label={{
-                    value: "TODAY",
-                    position: "top",
-                    fill: "hsl(220 10% 50%)",
-                    fontSize: 9,
-                    fontWeight: 600,
-                  }}
-                />
-              )}
               
               {/* Confidence band */}
               {showConfidence && (
-                <>
-                  <Area type="monotone" dataKey="upper" stroke="hsl(265 60% 62% / 0.2)" strokeWidth={1} strokeDasharray="2 2" fill="url(#confBandUpper)" name="Upper CI" />
-                  <Area type="monotone" dataKey="lower" stroke="hsl(265 60% 62% / 0.2)" strokeWidth={1} strokeDasharray="2 2" fill="url(#confBandLower)" name="Lower CI" />
-                </>
+                <Area 
+                  type="monotone" 
+                  dataKey="confidence" 
+                  stroke="none" 
+                  fill="#9333ea" 
+                  fillOpacity={0.15}
+                  name="Confidence Band" 
+                />
               )}
               
               {/* Actual */}
@@ -227,11 +207,10 @@ const DemandView = ({
                 <Line
                   type="monotone"
                   dataKey="predicted"
-                  stroke="hsl(265 60% 62%)"
-                  strokeWidth={2}
-                  strokeDasharray="6 3"
+                  stroke="#c084fc"
+                  strokeWidth={3}
                   dot={false}
-                  activeDot={{ r: 4, fill: "hsl(265 60% 62%)", stroke: "hsl(228 14% 5%)", strokeWidth: 2 }}
+                  activeDot={{ r: 6, fill: "#c084fc", stroke: "#0c0f17", strokeWidth: 2 }}
                   name="Forecast"
                 />
               )}
@@ -248,7 +227,7 @@ const DemandView = ({
           )}
           {showPredicted && (
             <div className="flex items-center gap-1.5">
-              <div className="w-5 h-[2px] rounded-full" style={{ background: "hsl(265 60% 62%)", opacity: 0.7 }} />
+              <div className="w-5 h-[3px] rounded-full" style={{ background: "hsl(280 80% 75%)" }} />
               <span className="text-[10px] text-muted-foreground">Forecast</span>
             </div>
           )}
