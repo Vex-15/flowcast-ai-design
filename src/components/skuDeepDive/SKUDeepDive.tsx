@@ -6,7 +6,7 @@ import { skuCatalog } from "@/data/brands";
 import { generateDemandForecast } from "@/data/generators";
 import {
   Package, AlertTriangle, MapPin, Tag, ArrowRight,
-  TrendingUp, TrendingDown, Award, LayoutDashboard, BarChart3, FlaskConical, Radio
+  TrendingUp, TrendingDown, Award, LayoutDashboard, BarChart3, FlaskConical, Radio, Heart
 } from "lucide-react";
 
 import DemandView from "@/components/demand/DemandView";
@@ -14,6 +14,7 @@ import AnomalyPanel from "@/components/demand/AnomalyPanel";
 import SignalsView from "@/components/signals/SignalsView";
 import InventoryView from "@/components/inventory/InventoryView";
 import SimulationView from "@/components/simulation/SimulationView";
+import RegistryDemandView from "@/components/skuDeepDive/RegistryDemandView";
 
 // ─── SKU Health Score computation ──────────────────────────
 function computeHealthScore(brain: RetailBrainState): number {
@@ -138,10 +139,13 @@ const SKUDeepDive = ({ brain }: { brain: RetailBrainState }) => {
     return first7 > 0 ? ((last7 - first7) / first7) * 100 : 0;
   }, [brain.forecast]);
 
+  const showRegistryTab = sku.seasonalPeak.some(p => ["wedding", "holiday", "baby"].includes(p)) || brain.registryDemand.activeRegistries > 3;
+
   const tabs: { id: SKUTab; label: string; icon: any }[] = [
     { id: "overview", label: "Overview", icon: LayoutDashboard },
     { id: "predictive-demand", label: "Predictive Demand", icon: BarChart3 },
     { id: "orchestration", label: "Inventory Orchestration", icon: FlaskConical },
+    ...(showRegistryTab ? [{ id: "registry" as SKUTab, label: "Registry Demand", icon: Heart }] : []),
   ];
 
   const renderOverview = () => (
@@ -267,6 +271,8 @@ const SKUDeepDive = ({ brain }: { brain: RetailBrainState }) => {
             </div>
           </div>
         );
+      case "registry":
+        return <RegistryDemandView brain={brain} />;
       case "overview":
       default:
         return renderOverview();

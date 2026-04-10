@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, Search, BarChart3, Radio, Undo2,
-  Package, FlaskConical, Brain, ChevronLeft, ChevronRight, Activity, Network
+  Package, FlaskConical, Brain, ChevronLeft, ChevronRight, Activity, Network, TrendingDown
 } from "lucide-react";
 import type { DashboardView, Brand } from "@/data/types";
 
@@ -15,9 +15,10 @@ interface SidebarProps {
 }
 
 const navItems: { view: DashboardView; label: string; icon: typeof LayoutDashboard }[] = [
-  { view: "executive",            label: "Overview",       icon: LayoutDashboard },
-  { view: "catalog-intelligence", label: "Catalog Intel",  icon: Network },
-  { view: "sku-deep-dive",        label: "SKU Workspace",  icon: Search },
+  { view: "executive",            label: "Overview",         icon: LayoutDashboard },
+  { view: "catalog-intelligence", label: "Catalog Intel",    icon: Network },
+  { view: "sku-deep-dive",        label: "SKU Workspace",    icon: Search },
+  { view: "price-elasticity",     label: "Price Elasticity", icon: TrendingDown },
 ];
 
 const Sidebar = ({

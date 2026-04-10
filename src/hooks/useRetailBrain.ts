@@ -17,6 +17,8 @@ import {
   generateDynamicNotifications,
   getNotificationSummary,
   generateMigrationGraph,
+  generateElasticity,
+  generateRegistryDemand,
 } from "@/data/generators";
 
 const defaultSimParams: SimulationParams = {
@@ -61,6 +63,8 @@ export function useRetailBrain() {
   const kpis = useMemo(() => generateKPIs(), []);
   const notificationSummary = useMemo(() => getNotificationSummary(notifications), [notifications]);
   const migrationGraph = useMemo(() => generateMigrationGraph(), []);
+  const elasticity = useMemo(() => generateElasticity(selectedSKU), [selectedSKU]);
+  const registryDemand = useMemo(() => generateRegistryDemand(selectedSKU), [selectedSKU]);
 
   const selectSKUAndNavigate = useCallback((skuId: string, tab?: SKUTab) => {
     setSelectedSKU(skuId);
@@ -133,6 +137,8 @@ export function useRetailBrain() {
     notifications,
     notificationSummary,
     migrationGraph,
+    elasticity,
+    registryDemand,
 
     // Actions
     selectSKUAndNavigate,

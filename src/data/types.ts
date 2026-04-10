@@ -342,14 +342,75 @@ export interface DemandMigrationGraph {
   absorbedDemandEstimate: number;    // $ that can be captured by substitutes
 }
 
+// ─── Price Elasticity Intelligence ─────────────────────────
+export interface ElasticityPoint {
+  priceMultiplier: number;   // 0.7 to 1.3 relative to current price
+  price: number;             // absolute price at that multiplier
+  predictedUnits: number;    // demand units predicted by model
+  predictedRevenue: number;  // price × units
+  confidenceLower: number;   // lower bound units
+  confidenceUpper: number;   // upper bound units
+}
+
+export interface ElasticityResult {
+  skuId: string;
+  currentPrice: number;
+  elasticityCoefficient: number;   // negative float e.g. -1.4 (10% price cut → 14% more units)
+  elasticityLabel: "Highly Elastic" | "Elastic" | "Unit Elastic" | "Inelastic";
+  revenueMaxPrice: number;         // price point that maximises total revenue
+  revenueMaxUnits: number;         // predicted units at revenue-maximising price
+  revenueMaxRevenue: number;       // total revenue at that price
+  markdownSweetSpot: { low: number; high: number };  // price range where discount generates net gain
+  curve: ElasticityPoint[];        // 13 points from 0.7x to 1.3x in 0.05 steps
+  competitorAnchor: number;        // simulated competitor reference price for this category
+  seasonalElasticityBoost: number; // how much more elastic demand is during peak season (0–1)
+  narrative: string;               // 1–2 sentence plain-English insight
+}
+
+// ─── Registry Demand Intelligence ──────────────────────────
+export interface RegistryEvent {
+  registryId: string;
+  eventType: "wedding" | "baby" | "housewarming" | "birthday";
+  eventDate: string;           // "Jun 14", "Jul 02", etc.
+  guestCount: number;
+  expectedPurchaseRate: number;  // 0–1 fraction of guests expected to buy
+  projectedUnits: number;
+  peakWeek: string;              // "May 26 – Jun 1" — the week of highest purchase concentration
+  daysUntilEvent: number;
+}
+
+export interface RegistryWeekBucket {
+  weekLabel: string;    // "Apr 14", "Apr 21", etc.
+  registryUnits: number;
+  organicUnits: number;
+  totalUnits: number;
+  registryCount: number;   // # of active registries contributing this week
+}
+
+export interface RegistryDemandResult {
+  skuId: string;
+  activeRegistries: number;
+  totalProjectedRegistryUnits: number;   // over next 90 days
+  registryRevenueAtStake: number;        // $ value
+  peakRegistryWeek: string;
+  peakRegistryUnits: number;
+  events: RegistryEvent[];               // top 5 upcoming registries
+  weeklyWave: RegistryWeekBucket[];      // 8 weeks of combined organic + registry forecast
+  registryShareOfDemand: number;         // 0–1 fraction of total demand coming from registries
+  inventoryGap: number;                  // units short if registry demand is not planned for
+  insight: string;                       // plain-English narrative
+}
+
 export type DashboardView =
   | "executive"
   | "sku-deep-dive"
-  | "catalog-intelligence";
+  | "catalog-intelligence"
+  | "price-elasticity";
 
 export type SKUTab =
   | "overview"
   | "predictive-demand"
-  | "orchestration";
+  | "orchestration"
+  | "registry";
 
 

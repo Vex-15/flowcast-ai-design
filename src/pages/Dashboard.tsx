@@ -3,6 +3,7 @@ import DashboardLayout from "@/components/layout/DashboardLayout";
 import ExecutiveView from "@/components/executive/ExecutiveView";
 import SKUDeepDive from "@/components/skuDeepDive/SKUDeepDive";
 import CatalogIntelligenceView from "@/components/catalog/CatalogIntelligenceView";
+import PriceElasticityView from "@/components/pricing/PriceElasticityView";
 
 const Dashboard = () => {
   const brain = useRetailBrain();
@@ -17,6 +18,9 @@ const Dashboard = () => {
 
       case "sku-deep-dive":
         return <SKUDeepDive brain={brain} />;
+
+      case "price-elasticity":
+        return <PriceElasticityView brain={brain} />;
 
       default:
         return <ExecutiveView brain={brain} />;

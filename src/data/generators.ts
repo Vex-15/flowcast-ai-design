@@ -8,6 +8,8 @@ import type {
   OrchestrationAlert, SKUPriority, KPI,
   DynamicNotification, NotificationSummary,
   MigrationEdge, MigrationNode, DemandMigrationGraph,
+  ElasticityResult, ElasticityPoint,
+  RegistryDemandResult, RegistryEvent, RegistryWeekBucket,
 } from "./types";
 import { getSKU, getStore, skuCatalog, stores } from "./brands";
 import { SimpleLinearRegression } from 'ml-regression-simple-linear';
@@ -1140,5 +1142,260 @@ export function generateMigrationGraph(filterCategory?: string): DemandMigration
     criticalNodeCount: criticalNodes.length,
     lostDemandEstimate: Math.round(lostEstimate),
     absorbedDemandEstimate: Math.round(absorbEstimate),
+  };
+}
+
+// ─── Price Elasticity Intelligence ─────────────────────────
+export function generateElasticity(skuId: string): ElasticityResult {
+  const rng = seeded(hashStr(skuId + "elasticity"));
+  const sku = getSKU(skuId);
+  const baseDemand = Math.max(8, Math.round(200 - sku.price * 0.08 + rng() * 30));
+
+  // Determine elasticity coefficient range based on category / price
+  let coeffMin: number;
+  let coeffMax: number;
+  const cat = sku.category.toLowerCase();
+
+  if ((cat === "living room" || cat === "bedroom" || cat === "beds" || cat === "seating" || cat === "dining" || cat === "outdoor") && sku.price > 1000) {
+    // Furniture / luxury — inelastic
+    coeffMin = -1.0;
+    coeffMax = -0.6;
+  } else if (cat === "appliances") {
+    // Appliances — elastic
+    coeffMin = -1.8;
+    coeffMax = -1.2;
+  } else if (cat === "cookware" || cat === "cutlery") {
+    // Cookware / cutlery
+    coeffMin = -1.3;
+    coeffMax = -0.9;
+  } else if (cat === "bedding" || cat === "decor" || cat === "home") {
+    // Bedding / decor — highly elastic
+    coeffMin = -2.0;
+    coeffMax = -1.4;
+  } else {
+    // Default (lighting, hardware, travel, accessories)
+    coeffMin = -1.5;
+    coeffMax = -0.8;
+  }
+
+  const elasticityCoefficient = parseFloat((coeffMax + (coeffMin - coeffMax) * rng()).toFixed(2));
+
+  // Label
+  const absCoeff = Math.abs(elasticityCoefficient);
+  const elasticityLabel: ElasticityResult["elasticityLabel"] =
+    absCoeff < 0.8 ? "Inelastic"
+    : absCoeff <= 1.0 ? "Unit Elastic"
+    : absCoeff <= 1.5 ? "Elastic"
+    : "Highly Elastic";
+
+  // Generate 13-point curve
+  const multipliers = [0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00, 1.05, 1.10, 1.15, 1.20, 1.25, 1.30];
+  const curve: ElasticityPoint[] = multipliers.map((multiplier) => {
+    const price = parseFloat((sku.price * multiplier).toFixed(2));
+    const predictedUnits = Math.round(
+      baseDemand * Math.pow(multiplier, elasticityCoefficient) * (0.95 + rng() * 0.1)
+    );
+    const predictedRevenue = parseFloat((price * predictedUnits).toFixed(2));
+    const confidenceBand = 0.08 + rng() * 0.04; // ±8–12%
+    const confidenceLower = Math.round(predictedUnits * (1 - confidenceBand));
+    const confidenceUpper = Math.round(predictedUnits * (1 + confidenceBand));
+
+    return {
+      priceMultiplier: multiplier,
+      price,
+      predictedUnits,
+      predictedRevenue,
+      confidenceLower,
+      confidenceUpper,
+    };
+  });
+
+  // Revenue-maximising price: find curve point with highest predictedRevenue
+  const revenueMaxPoint = curve.reduce((best, pt) =>
+    pt.predictedRevenue > best.predictedRevenue ? pt : best
+  , curve[0]);
+  const revenueMaxPrice = revenueMaxPoint.price;
+  const revenueMaxUnits = revenueMaxPoint.predictedUnits;
+  const revenueMaxRevenue = revenueMaxPoint.predictedRevenue;
+
+  // Markdown sweet spot: contiguous band below 1.0x where revenue exceeds revenue at current price
+  const currentRevenue = curve.find((p) => p.priceMultiplier === 1.00)!.predictedRevenue;
+  const belowCurrent = curve.filter((p) => p.priceMultiplier < 1.00 && p.predictedRevenue > currentRevenue);
+  let sweetSpotLow = sku.price * 0.85;
+  let sweetSpotHigh = sku.price * 0.95;
+
+  if (belowCurrent.length > 0) {
+    // Find contiguous band
+    const sorted = belowCurrent.sort((a, b) => a.priceMultiplier - b.priceMultiplier);
+    sweetSpotLow = sorted[0].price;
+    sweetSpotHigh = sorted[sorted.length - 1].price;
+  }
+
+  const markdownSweetSpot = { low: sweetSpotLow, high: sweetSpotHigh };
+
+  // Competitor anchor: typically 10–20% cheaper
+  const competitorAnchor = parseFloat((sku.price * (0.88 + rng() * 0.18)).toFixed(2));
+
+  // Seasonal elasticity boost
+  const seasonalElasticityBoost = sku.seasonalPeak.length > 0
+    ? parseFloat((0.1 + rng() * 0.25).toFixed(2))
+    : parseFloat((rng() * 0.08).toFixed(2));
+
+  // Narrative
+  const narrative = `A 10% price reduction drives ${Math.abs(elasticityCoefficient * 10).toFixed(0)}% more units for ${sku.name}. Revenue is maximised at $${revenueMaxPrice.toFixed(2)} — ${revenueMaxPrice < sku.price ? "below" : "above"} the current price point.`;
+
+  return {
+    skuId,
+    currentPrice: sku.price,
+    elasticityCoefficient,
+    elasticityLabel,
+    revenueMaxPrice,
+    revenueMaxUnits,
+    revenueMaxRevenue,
+    markdownSweetSpot,
+    curve,
+    competitorAnchor,
+    seasonalElasticityBoost,
+    narrative,
+  };
+}
+
+// ─── Registry Demand Intelligence ──────────────────────────
+export function generateRegistryDemand(skuId: string): RegistryDemandResult {
+  const rng = seeded(hashStr(skuId + "registry"));
+  const sku = getSKU(skuId);
+
+  // Determine registry activity level
+  const hasRegistrySeasons = sku.seasonalPeak.some(p => ["wedding", "holiday"].includes(p));
+  const activeRegistries = hasRegistrySeasons
+    ? Math.round(8 + rng() * 40)
+    : Math.round(1 + rng() * 8);
+
+  // Determine dominant event type by brand/category
+  const cat = sku.category.toLowerCase();
+  const brandId = sku.brand;
+  const getEventType = (): RegistryEvent["eventType"] => {
+    const r = rng();
+    if (brandId === "pbk") return r < 0.7 ? "baby" : r < 0.85 ? "birthday" : "housewarming";
+    if (brandId === "we") return r < 0.5 ? "housewarming" : r < 0.8 ? "wedding" : "birthday";
+    if (["cookware", "cutlery", "appliances", "living room"].includes(cat))
+      return r < 0.6 ? "wedding" : r < 0.8 ? "housewarming" : "birthday";
+    return r < 0.4 ? "wedding" : r < 0.65 ? "housewarming" : r < 0.85 ? "birthday" : "baby";
+  };
+
+  // Generate 5 registry events
+  const baseDate = new Date(2026, 3, 10); // Apr 10, 2026
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  const events: RegistryEvent[] = Array.from({ length: 5 }, (_, i) => {
+    const eventType = getEventType();
+    const daysUntilEvent = Math.round(7 + rng() * 83);
+    const eventDateObj = new Date(baseDate.getTime() + daysUntilEvent * 86400000);
+    const eventDate = `${monthNames[eventDateObj.getMonth()]} ${String(eventDateObj.getDate()).padStart(2, "0")}`;
+
+    const guestCount = Math.round(60 + rng() * 180);
+
+    // Purchase rate scales inversely with price
+    let purchaseRateMin: number, purchaseRateMax: number;
+    if (sku.price > 500) { purchaseRateMin = 0.08; purchaseRateMax = 0.15; }
+    else if (sku.price >= 200) { purchaseRateMin = 0.15; purchaseRateMax = 0.25; }
+    else { purchaseRateMin = 0.25; purchaseRateMax = 0.45; }
+    const expectedPurchaseRate = parseFloat((purchaseRateMin + rng() * (purchaseRateMax - purchaseRateMin)).toFixed(3));
+    const projectedUnits = Math.round(guestCount * expectedPurchaseRate);
+
+    // Peak week: ~2 weeks before event
+    const peakWeekStart = new Date(eventDateObj.getTime() - 14 * 86400000);
+    const peakWeekEnd = new Date(peakWeekStart.getTime() + 6 * 86400000);
+    const peakWeek = `${monthNames[peakWeekStart.getMonth()]} ${peakWeekStart.getDate()} \u2013 ${monthNames[peakWeekEnd.getMonth()]} ${peakWeekEnd.getDate()}`;
+
+    return {
+      registryId: `REG-${skuId}-${String(i + 1).padStart(3, "0")}`,
+      eventType,
+      eventDate,
+      guestCount,
+      expectedPurchaseRate,
+      projectedUnits,
+      peakWeek,
+      daysUntilEvent,
+    };
+  });
+
+  events.sort((a, b) => a.daysUntilEvent - b.daysUntilEvent);
+
+  // Generate 8-week wave starting Apr 14 2026
+  const waveStart = new Date(2026, 3, 14);
+  const baseDemand = Math.max(8, Math.round(200 - sku.price * 0.08 + rng() * 30));
+
+  const weeklyWave: RegistryWeekBucket[] = Array.from({ length: 8 }, (_, weekIdx) => {
+    const weekDate = new Date(waveStart.getTime() + weekIdx * 7 * 86400000);
+    const weekLabel = `${monthNames[weekDate.getMonth()]} ${String(weekDate.getDate()).padStart(2, "0")}`;
+
+    const organicUnits = Math.round(baseDemand * (0.85 + rng() * 0.3));
+
+    // Registry contribution: sum bell curves from all events
+    let registryUnits = 0;
+    let registryCount = 0;
+    events.forEach((evt) => {
+      const eventDateMs = baseDate.getTime() + evt.daysUntilEvent * 86400000;
+      const peakWeekIdx = Math.max(0, Math.min(7,
+        Math.round((eventDateMs - 14 * 86400000 - waveStart.getTime()) / (7 * 86400000))
+      ));
+      const baseRegistryLoad = evt.projectedUnits / 3;
+      const contribution = Math.round(
+        baseRegistryLoad * Math.exp(-0.5 * Math.pow((weekIdx - peakWeekIdx) / 1.5, 2))
+      );
+      if (contribution > 0) {
+        registryUnits += contribution;
+        registryCount++;
+      }
+    });
+
+    return {
+      weekLabel,
+      organicUnits,
+      registryUnits,
+      totalUnits: organicUnits + registryUnits,
+      registryCount,
+    };
+  });
+
+  // Aggregate stats
+  const totalProjectedRegistryUnits = events.reduce((s, e) => s + e.projectedUnits, 0);
+  const organicTotal = weeklyWave.reduce((s, w) => s + w.organicUnits, 0);
+  const registryRevenueAtStake = Math.round(totalProjectedRegistryUnits * sku.price);
+
+  // Peak registry week
+  const peakWeekBucket = weeklyWave.reduce((best, w) =>
+    w.registryUnits > best.registryUnits ? w : best
+  , weeklyWave[0]);
+  const peakRegistryWeek = peakWeekBucket.weekLabel;
+  const peakRegistryUnits = peakWeekBucket.registryUnits;
+
+  // Registry share of demand
+  const registryShareOfDemand = parseFloat(
+    Math.min(0.7, totalProjectedRegistryUnits / (totalProjectedRegistryUnits + organicTotal)).toFixed(3)
+  );
+
+  // Inventory gap
+  const currentStock = generateInventoryDecision(skuId).currentStock;
+  const totalProjected8Weeks = weeklyWave.reduce((s, w) => s + w.totalUnits, 0);
+  const inventoryGap = Math.max(0, totalProjected8Weeks - currentStock);
+
+  // Insight narrative
+  const weddingCount = events.filter(e => e.eventType === "wedding").length;
+  const insight = `${activeRegistries} active registries are projecting ${totalProjectedRegistryUnits} additional units over the next 90 days \u2014 ${(registryShareOfDemand * 100).toFixed(0)}% of forecast demand. Peak registry week is ${peakRegistryWeek} driven by ${weddingCount} upcoming wedding${weddingCount !== 1 ? "s" : ""}.`;
+
+  return {
+    skuId,
+    activeRegistries,
+    totalProjectedRegistryUnits,
+    registryRevenueAtStake,
+    peakRegistryWeek,
+    peakRegistryUnits,
+    events,
+    weeklyWave,
+    registryShareOfDemand,
+    inventoryGap,
+    insight,
   };
 }
