@@ -69,8 +69,8 @@ const NotificationCenter = ({
       />
       
       {/* Panel */}
-      <div className="fixed top-0 right-0 z-50 h-screen w-[420px] bg-[hsl(228,14%,5%)] border-l border-border/30 
-        shadow-2xl shadow-black/50 flex flex-col animate-slide-up"
+      <div className="fixed top-0 right-0 z-50 h-screen w-[420px] bg-card border-l border-border/30 
+        shadow-2xl shadow-black/10 flex flex-col animate-slide-up"
         style={{ animationDuration: "200ms" }}
       >
         {/* Header */}

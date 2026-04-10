@@ -52,7 +52,7 @@ const SignalsView = ({
             <ResponsiveContainer width="100%" height="100%">
               <RadarChart data={radarData} outerRadius="75%">
                 <PolarGrid
-                  stroke="hsl(225 12% 14%)"
+                  stroke="hsl(var(--border))"
                   strokeDasharray="2 2"
                 />
                 <PolarAngleAxis
@@ -70,11 +70,12 @@ const SignalsView = ({
                 />
                 <Tooltip
                   contentStyle={{
-                    background: "hsl(225 15% 9%)",
-                    border: "1px solid hsl(225 12% 16%)",
+                    background: "hsl(var(--card))",
+                    border: "1px solid hsl(var(--border))",
                     borderRadius: "10px",
                     fontSize: "11px",
-                    boxShadow: "0 8px 32px -8px rgba(0,0,0,0.5)",
+                    color: "hsl(var(--foreground))",
+                    boxShadow: "0 8px 32px -8px rgba(0,0,0,0.15)",
                   }}
                   formatter={(value: number) => [`${value}%`, "Strength"]}
                 />
