@@ -458,7 +458,8 @@ export function generateInventoryDecision(skuId: string): InventoryDecision {
   const rng = seeded(hashStr(skuId + "inventory"));
   const sku = getSKU(skuId);
   const avgDailyDemand = Math.max(3, Math.round(60 - sku.price * 0.02 + rng() * 20));
-  const currentStock = Math.round(avgDailyDemand * (3 + rng() * 18));
+  const daysSupplyMultiplier = -2 + rng() * 32; // Range [-2, 30]
+  const currentStock = Math.max(0, Math.round(avgDailyDemand * daysSupplyMultiplier));
   const daysUntilStockout = Math.max(0, Math.round(currentStock / avgDailyDemand));
   const stockoutRisk = parseFloat(Math.min(1, Math.max(0, 1 - daysUntilStockout / 21)).toFixed(2));
   const overstockRisk = parseFloat(Math.min(1, Math.max(0, (daysUntilStockout - 14) / 21)).toFixed(2));
